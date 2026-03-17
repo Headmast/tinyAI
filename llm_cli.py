@@ -119,23 +119,22 @@ def get_available_modes(model_name="gpt-3.5-turbo"):
             "params": {
                 "model": model_name,
                 "messages": [],
-                "max_tokens": 100,
+                "max_completion_tokens": 100,
                 "temperature": 0.7
             },
             "system_prompt": "Отвечай предельно кратко и лаконично. Максимум 50 слов.",
-            "metadata": {"mode": "length_limited", "max_tokens": 100, "max_words": 50}
+            "metadata": {"mode": "length_limited", "max_completion_tokens": 100, "max_words": 50}
         },
         {
             "id": 4,
-            "name": "С условием завершения (stop sequence)",
+            "name": "С явной инструкцией завершения",
             "params": {
                 "model": model_name,
                 "messages": [],
-                "stop": ["[КОНЕЦ]"],
                 "temperature": 0.7
             },
-            "system_prompt": "После завершения ответа обязательно добавь маркер [КОНЕЦ]",
-            "metadata": {"mode": "with_stop_sequence", "stop": ["[КОНЕЦ]"]}
+            "system_prompt": "После завершения ответа обязательно добавь маркер [КОНЕЦ]. Это важно для обозначения конца ответа.",
+            "metadata": {"mode": "with_end_marker", "instruction": "Add [КОНЕЦ] marker"}
         },
         {
             "id": 5,
