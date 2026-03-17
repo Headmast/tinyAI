@@ -80,6 +80,17 @@ def get_available_modes():
             },
             "system_prompt": "После завершения ответа обязательно добавь маркер [КОНЕЦ]",
             "metadata": {"mode": "with_stop_sequence", "stop": ["[КОНЕЦ]"]}
+        },
+        {
+            "id": 5,
+            "name": "С выводом в формате JSON",
+            "params": {
+                "model": "gpt-3.5-turbo",
+                "messages": [],
+                "temperature": 0.7
+            },
+            "system_prompt": "Отвечай СТРОГО в формате JSON с полями:\n- \"answer\": подробный ответ на вопрос\n- \"summary\": краткое резюме в 1-2 предложения\n- \"key_points\": массив из 2-3 ключевых моментов\nВозвращай только валидный JSON, без дополнительного текста.",
+            "metadata": {"mode": "json_format", "format": "JSON with answer, summary, and key_points"}
         }
     ]
 
@@ -243,7 +254,7 @@ def main():
     print("  'quit' / 'exit' / 'q' - выход")
     print("  'compare' - сравнение всех режимов")
     print("  'modes' - показать список режимов")
-    print("  'mode N' - переключиться на режим N (1-4)")
+    print("  'mode N' - переключиться на режим N (1-5)")
     print("\nТекущий режим: Стандартный (без ограничений)")
     print(f"Логи сохраняются в: {log_file}")
     print("-" * 50)
@@ -268,14 +279,14 @@ def main():
         if user_input.lower().startswith('mode '):
             try:
                 mode_num = int(user_input.split()[1])
-                if 1 <= mode_num <= 4:
+                if 1 <= mode_num <= 5:
                     current_mode_id = mode_num
                     mode_name = get_available_modes()[mode_num - 1]['name']
                     print(f"\n✓ Переключено на режим {mode_num}: {mode_name}")
                 else:
-                    print("Ошибка: Выберите режим от 1 до 4")
+                    print("Ошибка: Выберите режим от 1 до 5")
             except (IndexError, ValueError):
-                print("Ошибка: Используйте формат 'mode N', где N - номер режима (1-4)")
+                print("Ошибка: Используйте формат 'mode N', где N - номер режима (1-5)")
             continue
         
         if user_input.lower() == 'compare':
