@@ -38,6 +38,12 @@ def get_available_models():
             "prompt_price": 0.03,
             "completion_price": 0.06,
             "description": "Наиболее мощная модель, высокая стоимость"
+        },
+        "gpt-5.4": {
+            "name": "GPT-5.4",
+            "prompt_price": 0.0025,
+            "completion_price": 0.015,
+            "description": "Новейшая модель GPT-5, высокая производительность"
         }
     }
 
