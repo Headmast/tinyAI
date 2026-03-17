@@ -7,6 +7,50 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def get_available_models():
+    return {
+        "gpt-3.5-turbo": {
+            "name": "GPT-3.5 Turbo",
+            "prompt_price": 0.0015,
+            "completion_price": 0.002,
+            "description": "Быстрая и экономичная модель"
+        },
+        "gpt-4o-mini": {
+            "name": "GPT-4o Mini",
+            "prompt_price": 0.00015,
+            "completion_price": 0.0006,
+            "description": "Самая экономичная модель GPT-4 класса"
+        },
+        "gpt-4o": {
+            "name": "GPT-4o",
+            "prompt_price": 0.005,
+            "completion_price": 0.015,
+            "description": "Оптимизированная GPT-4, баланс цены и качества"
+        },
+        "gpt-4-turbo": {
+            "name": "GPT-4 Turbo",
+            "prompt_price": 0.01,
+            "completion_price": 0.03,
+            "description": "Быстрая версия GPT-4"
+        },
+        "gpt-4": {
+            "name": "GPT-4",
+            "prompt_price": 0.03,
+            "completion_price": 0.06,
+            "description": "Наиболее мощная модель, высокая стоимость"
+        }
+    }
+
+def calculate_cost(prompt_tokens, completion_tokens, model_name):
+    models = get_available_models()
+    if model_name not in models:
+        model_name = "gpt-3.5-turbo"
+    
+    model = models[model_name]
+    prompt_cost = (prompt_tokens * model["prompt_price"]) / 1000
+    completion_cost = (completion_tokens * model["completion_price"]) / 1000
+    return prompt_cost + completion_cost
+
 def setup_logging():
     logs_dir = Path("logs")
     logs_dir.mkdir(exist_ok=True)
@@ -34,13 +78,13 @@ def log_interaction(log_file, user_input, assistant_response, usage_info, metada
     with open(log_file, 'w', encoding='utf-8') as f:
         json.dump(logs, f, ensure_ascii=False, indent=2)
 
-def get_available_modes():
+def get_available_modes(model_name="gpt-3.5-turbo"):
     return [
         {
             "id": 1,
             "name": "Без ограничений",
             "params": {
-                "model": "gpt-3.5-turbo",
+                "model": model_name,
                 "messages": [],
                 "temperature": 0.7
             },
@@ -50,7 +94,7 @@ def get_available_modes():
             "id": 2,
             "name": "С явным форматом ответа",
             "params": {
-                "model": "gpt-3.5-turbo",
+                "model": model_name,
                 "messages": [],
                 "temperature": 0.7
             },
@@ -61,7 +105,7 @@ def get_available_modes():
             "id": 3,
             "name": "С ограничением длины",
             "params": {
-                "model": "gpt-3.5-turbo",
+                "model": model_name,
                 "messages": [],
                 "max_tokens": 100,
                 "temperature": 0.7
@@ -73,7 +117,7 @@ def get_available_modes():
             "id": 4,
             "name": "С условием завершения (stop sequence)",
             "params": {
-                "model": "gpt-3.5-turbo",
+                "model": model_name,
                 "messages": [],
                 "stop": ["[КОНЕЦ]"],
                 "temperature": 0.7
@@ -85,7 +129,7 @@ def get_available_modes():
             "id": 5,
             "name": "С выводом в формате JSON",
             "params": {
-                "model": "gpt-3.5-turbo",
+                "model": model_name,
                 "messages": [],
                 "temperature": 0.7
             },
@@ -109,12 +153,13 @@ def execute_mode(client, mode, user_input):
     response = client.chat.completions.create(**params)
     return response
 
-def compare_formatting_modes(client, user_input, log_file):
+def compare_formatting_modes(client, user_input, log_file, model_name="gpt-3.5-turbo"):
     print("\n" + "=" * 70)
     print("РЕЖИМ СРАВНЕНИЯ: отправка одного запроса с разными параметрами")
+    print(f"Используемая модель: {get_available_models()[model_name]['name']}")
     print("=" * 70)
     
-    modes = get_available_modes()
+    modes = get_available_modes(model_name)
     
     results = []
     
@@ -135,7 +180,7 @@ def compare_formatting_modes(client, user_input, log_file):
             total_tokens = usage.total_tokens
             word_count = count_words(assistant_message)
             
-            cost = (prompt_tokens * 0.0015 / 1000) + (completion_tokens * 0.002 / 1000)
+            cost = calculate_cost(prompt_tokens, completion_tokens, mode['params']['model'])
             
             usage_info = {
                 "prompt_tokens": prompt_tokens,
@@ -190,8 +235,8 @@ def compare_formatting_modes(client, user_input, log_file):
     
     return results
 
-def interactive_mode_selection(client, user_input, log_file, mode_id):
-    modes = get_available_modes()
+def interactive_mode_selection(client, user_input, log_file, mode_id, model_name="gpt-3.5-turbo"):
+    modes = get_available_modes(model_name)
     selected_mode = None
     
     for mode in modes:
@@ -217,14 +262,15 @@ def interactive_mode_selection(client, user_input, log_file, mode_id):
         total_tokens = usage.total_tokens
         word_count = count_words(assistant_message)
         
-        cost = (prompt_tokens * 0.0015 / 1000) + (completion_tokens * 0.002 / 1000)
+        cost = calculate_cost(prompt_tokens, completion_tokens, selected_mode['params']['model'])
         
         usage_info = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
             "word_count": word_count,
-            "cost": cost
+            "cost": cost,
+            "model": selected_mode['params']['model']
         }
         
         log_interaction(log_file, user_input, assistant_message, usage_info, selected_mode['metadata'])
@@ -255,7 +301,10 @@ def main():
     print("  'compare' - сравнение всех режимов")
     print("  'modes' - показать список режимов")
     print("  'mode N' - переключиться на режим N (1-5)")
+    print("  'models' - показать список моделей")
+    print("  'model <name>' - переключиться на модель")
     print("\nТекущий режим: Стандартный (без ограничений)")
+    print("Текущая модель: GPT-3.5 Turbo")
     print(f"Логи сохраняются в: {log_file}")
     print("-" * 50)
     
@@ -263,17 +312,41 @@ def main():
     total_completion_tokens = 0
     total_cost = 0.0
     current_mode_id = 1
+    current_model = "gpt-3.5-turbo"
     
     while True:
         user_input = input("\nYou: ").strip()
         
+        if user_input.lower() == 'models':
+            print("\nДоступные модели:")
+            models = get_available_models()
+            for model_id, model_info in models.items():
+                marker = "★" if model_id == current_model else " "
+                print(f"{marker} {model_id}")
+                print(f"   Название: {model_info['name']}")
+                print(f"   Описание: {model_info['description']}")
+                print(f"   Цена: ${model_info['prompt_price']}/1K prompt, ${model_info['completion_price']}/1K completion")
+            continue
+        
         if user_input.lower() == 'modes':
             print("\nДоступные режимы:")
-            for mode in get_available_modes():
+            for mode in get_available_modes(current_model):
                 marker = "★" if mode['id'] == current_mode_id else " "
                 print(f"{marker} {mode['id']}. {mode['name']}")
                 if 'system_prompt' in mode:
                     print(f"   Промпт: {mode['system_prompt'][:70]}...")
+            continue
+        
+        if user_input.lower().startswith('model '):
+            model_name = user_input[6:].strip()
+            if model_name in get_available_models():
+                current_model = model_name
+                model_info = get_available_models()[model_name]
+                print(f"\n✓ Переключено на модель: {model_info['name']}")
+                print(f"  Цена: ${model_info['prompt_price']}/1K prompt, ${model_info['completion_price']}/1K completion")
+            else:
+                print(f"Ошибка: Модель '{model_name}' не найдена")
+                print("Используйте 'models' для просмотра доступных моделей")
             continue
         
         if user_input.lower().startswith('mode '):
@@ -281,7 +354,7 @@ def main():
                 mode_num = int(user_input.split()[1])
                 if 1 <= mode_num <= 5:
                     current_mode_id = mode_num
-                    mode_name = get_available_modes()[mode_num - 1]['name']
+                    mode_name = get_available_modes(current_model)[mode_num - 1]['name']
                     print(f"\n✓ Переключено на режим {mode_num}: {mode_name}")
                 else:
                     print("Ошибка: Выберите режим от 1 до 5")
@@ -292,7 +365,7 @@ def main():
         if user_input.lower() == 'compare':
             compare_input = input("Введите запрос для сравнения: ").strip()
             if compare_input:
-                compare_formatting_modes(client, compare_input, log_file)
+                compare_formatting_modes(client, compare_input, log_file, current_model)
             continue
         
         if user_input.lower() in ['quit', 'exit', 'q']:
@@ -309,7 +382,7 @@ def main():
             continue
         
         try:
-            usage_info = interactive_mode_selection(client, user_input, log_file, current_mode_id)
+            usage_info = interactive_mode_selection(client, user_input, log_file, current_mode_id, current_model)
             
             if usage_info:
                 total_prompt_tokens += usage_info['prompt_tokens']
