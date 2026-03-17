@@ -44,6 +44,12 @@ def get_available_models():
             "prompt_price": 0.0025,
             "completion_price": 0.015,
             "description": "Новейшая модель GPT-5, высокая производительность"
+        },
+        "gpt-5-nano": {
+            "name": "GPT-5 Nano",
+            "prompt_price": 0.00005,
+            "completion_price": 0.0004,
+            "description": "Компактная версия GPT-5, оптимальное соотношение цены и качества"
         }
     }
 
