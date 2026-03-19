@@ -662,6 +662,138 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     
     return results
 
+def compare_temperatures(client, user_input, log_file, model_name="zai-org/GLM-4.7-Flash"):
+    """Сравнение влияния температуры на ответы модели"""
+    print("\n" + "=" * 70)
+    print("СРАВНЕНИЕ ВЛИЯНИЯ ТЕМПЕРАТУРЫ НА ОТВЕТЫ")
+    print(f"Используемая модель: {get_available_models()[model_name]['name']}")
+    print(f"Задача: {user_input}")
+    print("=" * 70)
+    
+    # Проверка поддержки температуры
+    if model_name == "gpt-5-nano":
+        print("\n⚠️ ВНИМАНИЕ: Модель gpt-5-nano НЕ поддерживает параметр temperature!")
+        print("Переключитесь на GLM-4.7-Flash или GLM-4.7 для сравнения температур.")
+        print("\nИспользуйте команду: model zai-org/GLM-4.7-Flash")
+        return []
+    
+    temperatures = [0, 0.7, 1.2]
+    results = []
+    
+    for temp in temperatures:
+        print(f"\n{'─' * 70}")
+        print(f"TEMPERATURE = {temp}")
+        print(f"{'─' * 70}")
+        
+        # Описание характеристик температуры
+        if temp == 0:
+            print("Характеристики: Детерминированность, точность, повторяемость")
+        elif temp == 0.7:
+            print("Характеристики: Баланс между точностью и креативностью")
+        elif temp == 1.2:
+            print("Характеристики: Высокая креативность, разнообразие, непредсказуемость")
+        
+        try:
+            base_params = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": user_input}],
+                "max_completion_tokens": 120000,
+                "temperature": temp
+            }
+            params = get_model_params(model_name, base_params)
+            
+            print("\n🤔 Генерирую ответ...", flush=True)
+            answer, reasoning = stream_response(client, params.copy())
+            
+            # Оценка токенов
+            estimated_tokens = (len(answer) + len(reasoning)) // 4
+            word_count = count_words(answer)
+            
+            print(f"\n\n[Конец ответа]")
+            print(f"\nСтатистика:")
+            print(f"  Символов: {len(answer)}")
+            print(f"  Слов: {word_count}")
+            print(f"  Токенов (примерно): {estimated_tokens}")
+            
+            # Логирование
+            usage_info = {
+                "prompt_tokens": len(user_input) // 4,
+                "completion_tokens": estimated_tokens,
+                "total_tokens": len(user_input) // 4 + estimated_tokens,
+                "word_count": word_count,
+                "cost": calculate_cost(len(user_input) // 4, estimated_tokens, model_name)
+            }
+            
+            metadata = {
+                "experiment": "temperature_comparison",
+                "temperature": temp
+            }
+            
+            log_interaction(log_file, user_input, answer, usage_info, metadata)
+            
+            results.append({
+                "temperature": temp,
+                "response": answer,
+                "chars": len(answer),
+                "words": word_count,
+                "tokens": estimated_tokens
+            })
+            
+        except Exception as e:
+            print(f"\n❌ Ошибка при temperature={temp}: {str(e)}")
+    
+    # Сводка и анализ
+    print("\n" + "=" * 70)
+    print("СВОДКА СРАВНЕНИЯ ТЕМПЕРАТУР")
+    print("=" * 70)
+    
+    for result in results:
+        print(f"\nTemperature = {result['temperature']}:")
+        print(f"  Символов: {result['chars']}")
+        print(f"  Слов: {result['words']}")
+        print(f"  Токенов: {result['tokens']}")
+    
+    if results:
+        print("\n" + "─" * 70)
+        print("АНАЛИЗ И ВЫВОДЫ")
+        print("─" * 70)
+        
+        # Статистика по метрикам
+        chars_data = [r['chars'] for r in results]
+        words_data = [r['words'] for r in results]
+        
+        print(f"\n📊 Разброс метрик:")
+        print(f"  Символы: {min(chars_data)} - {max(chars_data)} (разница: {max(chars_data) - min(chars_data)})")
+        print(f"  Слова: {min(words_data)} - {max(words_data)} (разница: {max(words_data) - min(words_data)})")
+        
+        # Выводы и рекомендации
+        print(f"\n💡 РЕКОМЕНДАЦИИ ПО ИСПОЛЬЗОВАНИЮ:")
+        print(f"\n🎯 Temperature = 0 (Детерминированная):")
+        print(f"   ✓ Задачи требующие точности и повторяемости")
+        print(f"   ✓ Технические объяснения, документация")
+        print(f"   ✓ Извлечение фактов, классификация")
+        print(f"   ✓ Когда нужен один правильный ответ")
+        
+        print(f"\n⚖️ Temperature = 0.7 (Сбалансированная):")
+        print(f"   ✓ Универсальный вариант для большинства задач")
+        print(f"   ✓ Диалоги, вопросы-ответы")
+        print(f"   ✓ Объяснения с примерами")
+        print(f"   ✓ Когда нужен баланс точности и естественности")
+        
+        print(f"\n🎨 Temperature = 1.2 (Креативная):")
+        print(f"   ✓ Творческие задачи (рассказы, идеи)")
+        print(f"   ✓ Brainstorming, генерация альтернатив")
+        print(f"   ✓ Когда нужно разнообразие ответов")
+        print(f"   ✓ Менее критичные задачи, где допустима вариативность")
+        
+        print(f"\n⚠️ ВАЖНО:")
+        print(f"   • Высокая температура (>1.0) может давать менее точные ответы")
+        print(f"   • Низкая температура (0) всегда даёт одинаковые ответы")
+        print(f"   • Для критичных задач используйте temperature ≤ 0.3")
+        print(f"   • Для креативных задач можно использовать temperature ≥ 1.0")
+    
+    return results
+
 def interactive_mode_selection(client, user_input, log_file, mode_id, model_name="zai-org/GLM-4.7-Flash"):
     modes = get_available_modes(model_name)
     selected_mode = None
@@ -746,6 +878,7 @@ def main():
     print("  'quit' / 'exit' / 'q' - выход")
     print("  'compare' - сравнение всех режимов")
     print("  'reasoning' - сравнение способов рассуждения (День 3)")
+    print("  'temperature' - сравнение температур (0, 0.7, 1.2)")
     print("  'modes' - показать список режимов")
     print("  'mode N' - переключиться на режим N (1-6)")
     print("  'models' - показать список моделей")
@@ -753,6 +886,7 @@ def main():
     print("\nТекущий режим: Стандартный (без ограничений)")
     print("Текущая модель: GPT-5 Nano (OpenAI)")
     print(f"Логи сохраняются в: {log_file}")
+    print("\n⚠️ Для сравнения температур используйте модели Cloud.ru (GLM-4.7-Flash/GLM-4.7)")
     print("-" * 50)
     
     total_prompt_tokens = 0
@@ -821,6 +955,13 @@ def main():
             if task_input:
                 client = get_client_for_model(current_model, clients)
                 compare_reasoning_approaches(client, task_input, log_file, current_model)
+            continue
+        
+        if user_input.lower() == 'temperature':
+            task_input = input("Введите запрос для сравнения температур: ").strip()
+            if task_input:
+                client = get_client_for_model(current_model, clients)
+                compare_temperatures(client, task_input, log_file, current_model)
             continue
         
         if user_input.lower() in ['quit', 'exit', 'q']:
