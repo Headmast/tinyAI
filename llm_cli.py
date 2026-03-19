@@ -482,12 +482,18 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         base_params = {"model": model_name, "messages": [{"role": "user", "content": user_input}], "max_completion_tokens": 120000, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Размышляю...", flush=True)
-        response = client.chat.completions.create(**params)
-        print("\r✓ Готово!      ", flush=True)
-        answer1 = response.choices[0].message.content
-        usage1 = response.usage
         
-        print(f"\nОтвет: {answer1}")
+        # Используем streaming для показа размышлений
+        answer1, reasoning1 = stream_response(client, params.copy())
+        
+        # Оценка токенов
+        estimated_tokens = (len(answer1) + len(reasoning1)) // 4
+        usage1 = type('obj', (object,), {
+            'total_tokens': estimated_tokens
+        })()
+        
+        print(f"\n\n[Конец ответа]")
+        print(f"Ответ: {len(answer1)} символов")
         print("\n[Конец ответа]")
         print(f"\nСтатистика: Токены: {usage1.total_tokens} | Слова: {count_words(answer1)}")
         
@@ -511,12 +517,18 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         base_params = {"model": model_name, "messages": [{"role": "user", "content": step_by_step_prompt}], "max_completion_tokens": 120000, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Размышляю пошагово...", flush=True)
-        response = client.chat.completions.create(**params)
-        print("\r✓ Готово!               ", flush=True)
-        answer2 = response.choices[0].message.content
-        usage2 = response.usage
         
-        print(f"\nОтвет: {answer2}")
+        # Используем streaming для показа размышлений
+        answer2, reasoning2 = stream_response(client, params.copy())
+        
+        # Оценка токенов
+        estimated_tokens = (len(answer2) + len(reasoning2)) // 4
+        usage2 = type('obj', (object,), {
+            'total_tokens': estimated_tokens
+        })()
+        
+        print(f"\n\n[Конец ответа]")
+        print(f"Ответ: {len(answer2)} символов")
         print("\n[Конец ответа]")
         print(f"\nСтатистика: Токены: {usage2.total_tokens} | Слова: {count_words(answer2)}")
         
@@ -540,24 +552,28 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         base_params = {"model": model_name, "messages": [{"role": "user", "content": meta_request}], "max_completion_tokens": 120000, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Создаю промпт...", flush=True)
-        meta_response = client.chat.completions.create(**params)
-        print("\r✓ Промпт создан!    ", flush=True)
-        generated_prompt = meta_response.choices[0].message.content
         
-        print(f"\nСгенерированный промпт: {generated_prompt}")
+        # Streaming для создания промпта
+        generated_prompt, reasoning_meta = stream_response(client, params.copy())
+        
+        print(f"\n\nСгенерированный промпт: {generated_prompt}")
         print(f"\n{'·' * 70}")
         
         base_params = {"model": model_name, "messages": [{"role": "user", "content": generated_prompt}], "max_completion_tokens": 120000, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Решаю по промпту...", flush=True)
-        response = client.chat.completions.create(**params)
-        print("\r✓ Готово!              ", flush=True)
-        answer3 = response.choices[0].message.content
+        
+        # Streaming для решения по промпту
+        answer3, reasoning3 = stream_response(client, params.copy())
+        
+        # Оценка токенов
+        estimated_tokens = (len(generated_prompt) + len(reasoning_meta) + len(answer3) + len(reasoning3)) // 4
         usage3_combined = type('obj', (object,), {
-            'total_tokens': meta_response.usage.total_tokens + response.usage.total_tokens
+            'total_tokens': estimated_tokens
         })
         
-        print(f"\nОтвет: {answer3}")
+        print(f"\n\n[Конец ответа]")
+        print(f"Ответ: {len(answer3)} символов")
         print("\n[Конец ответа]")
         print(f"\nСтатистика: Токены: {usage3_combined.total_tokens} | Слова: {count_words(answer3)}")
         
@@ -595,13 +611,15 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
             base_params = {"model": model_name, "messages": messages, "max_completion_tokens": 120000, "temperature": 0.7}
             params = get_model_params(model_name, base_params)
             print(f"🤔 {expert_name} размышляет...", flush=True)
-            response = client.chat.completions.create(**params)
-            print(f"\r✓ {expert_name} ответил!        ", flush=True)
-            expert_answer = response.choices[0].message.content
-            total_tokens_experts += response.usage.total_tokens
             
-            print(expert_answer, flush=True)
-            print(f"(Токены: {response.usage.total_tokens})", flush=True)
+            # Используем streaming для показа размышлений эксперта
+            expert_answer, expert_reasoning = stream_response(client, params.copy())
+            
+            # Оценка токенов
+            estimated_tokens = (len(expert_answer) + len(expert_reasoning)) // 4
+            total_tokens_experts += estimated_tokens
+            
+            print(f"\n(Токены: ~{estimated_tokens})", flush=True)
             expert_answers.append(f"[{expert_name}]: {expert_answer}")
         
         combined_answer = "\n\n".join(expert_answers)
