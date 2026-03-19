@@ -200,6 +200,10 @@ def stream_response(client, params, show_thinking=True):
         stream = client.chat.completions.create(**params)
         
         for chunk in stream:
+            # Проверяем наличие choices
+            if not chunk.choices or len(chunk.choices) == 0:
+                continue
+            
             delta = chunk.choices[0].delta
             
             # Вывод размышлений (reasoning_content)
@@ -212,7 +216,7 @@ def stream_response(client, params, show_thinking=True):
                     print(delta.reasoning_content, end="", flush=True)
             
             # Вывод основного ответа
-            if delta.content:
+            if hasattr(delta, 'content') and delta.content:
                 if in_reasoning and show_thinking:
                     print("\n\n📝 [Ответ]", flush=True)
                     in_reasoning = False
@@ -227,6 +231,8 @@ def stream_response(client, params, show_thinking=True):
         
     except Exception as e:
         print(f"\n❌ Ошибка при streaming: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
         # Fallback на обычный режим
         params['stream'] = False
         if 'extra_body' in params:
