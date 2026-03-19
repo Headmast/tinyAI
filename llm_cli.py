@@ -174,35 +174,65 @@ def count_words(text):
     return len(text.split())
 
 def stream_response(client, params, show_thinking=True):
-    """Потоковый вывод ответа с поэтапной печатью"""
+    """Потоковый вывод ответа с поэтапной печатью и размышлениями"""
     import sys
     
     # Включаем streaming
     params['stream'] = True
     
+    # Включаем thinking для GLM-4.7
+    model_name = params.get('model', '')
+    if 'GLM' in model_name.upper():
+        if 'extra_body' not in params:
+            params['extra_body'] = {}
+        params['extra_body']['thinking'] = {
+            'type': 'enabled',
+            'clear_thinking': False  # Сохраняем размышления
+        }
+    
     full_response = ""
+    reasoning_text = ""
+    in_reasoning = False
+    
     print("\n", flush=True)
     
     try:
         stream = client.chat.completions.create(**params)
         
         for chunk in stream:
-            if chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
+            delta = chunk.choices[0].delta
+            
+            # Вывод размышлений (reasoning_content)
+            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                if not in_reasoning and show_thinking:
+                    print("\n💭 [Размышление]", flush=True)
+                    in_reasoning = True
+                reasoning_text += delta.reasoning_content
+                if show_thinking:
+                    print(delta.reasoning_content, end="", flush=True)
+            
+            # Вывод основного ответа
+            if delta.content:
+                if in_reasoning and show_thinking:
+                    print("\n\n📝 [Ответ]", flush=True)
+                    in_reasoning = False
+                content = delta.content
                 full_response += content
                 print(content, end="", flush=True)
         
         print("\n", flush=True)
         
         # Возвращаем полный ответ для логирования
-        return full_response
+        return full_response, reasoning_text
         
     except Exception as e:
         print(f"\n❌ Ошибка при streaming: {str(e)}", flush=True)
         # Fallback на обычный режим
         params['stream'] = False
+        if 'extra_body' in params:
+            del params['extra_body']
         response = client.chat.completions.create(**params)
-        return response.choices[0].message.content
+        return response.choices[0].message.content, ""
 
 def execute_mode(client, mode, user_input, max_retries=3):
     # Режим 6: метапромптинг с двумя этапами
@@ -225,31 +255,36 @@ def execute_mode(client, mode, user_input, max_retries=3):
             print("🤔 Размышляю...", flush=True)
             
             # Используем streaming для постепенного вывода
-            answer_text = stream_response(client, params.copy())
+            answer_text, reasoning_text = stream_response(client, params.copy())
             
             # Создаём объект ответа для совместимости
             # Делаем обычный запрос для получения usage статистики
             params_for_usage = params.copy()
             params_for_usage['max_completion_tokens'] = 1  # Минимальный запрос для статистики
+            if 'extra_body' in params_for_usage:
+                del params_for_usage['extra_body']  # Убираем thinking для статистики
             usage_response = client.chat.completions.create(**params_for_usage)
             
             # Создаём mock объект с ответом
             class MockResponse:
-                def __init__(self, content, usage):
+                def __init__(self, content, usage, reasoning=""):
                     self.choices = [type('obj', (object,), {
-                        'message': type('obj', (object,), {'content': content})()
+                        'message': type('obj', (object,), {
+                            'content': content,
+                            'reasoning_content': reasoning
+                        })()
                     })()]
                     self.usage = usage
             
             # Примерная оценка токенов (1 токен ≈ 4 символа)
-            estimated_tokens = len(answer_text) // 4
+            estimated_tokens = (len(answer_text) + len(reasoning_text)) // 4
             mock_usage = type('obj', (object,), {
                 'prompt_tokens': usage_response.usage.prompt_tokens,
                 'completion_tokens': estimated_tokens,
                 'total_tokens': usage_response.usage.prompt_tokens + estimated_tokens
             })()
             
-            return MockResponse(answer_text, mock_usage)
+            return MockResponse(answer_text, mock_usage, reasoning_text)
             
         except Exception as e:
             print("\r", end="", flush=True)
