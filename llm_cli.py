@@ -104,6 +104,7 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
             "params": {
                 "model": model_name,
                 "messages": [],
+                "max_completion_tokens": 4096,
                 "temperature": 0.7
             },
             "metadata": {"mode": "unrestricted"}
@@ -114,6 +115,7 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
             "params": {
                 "model": model_name,
                 "messages": [],
+                "max_completion_tokens": 4096,
                 "temperature": 0.7
             },
             "system_prompt": "Структурируй свой ответ следующим образом:\n1. ОСНОВНОЙ ОТВЕТ: (подробный ответ на вопрос)\n2. КРАТКОЕ РЕЗЮМЕ: (1-2 предложения)\n3. КЛЮЧЕВЫЕ МОМЕНТЫ: (список из 2-3 пунктов)",
@@ -137,6 +139,7 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
             "params": {
                 "model": model_name,
                 "messages": [],
+                "max_completion_tokens": 4096,
                 "temperature": 0.7
             },
             "system_prompt": "После завершения ответа обязательно добавь маркер [КОНЕЦ]. Это важно для обозначения конца ответа.",
@@ -148,6 +151,7 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
             "params": {
                 "model": model_name,
                 "messages": [],
+                "max_completion_tokens": 4096,
                 "temperature": 0.7
             },
             "system_prompt": "Отвечай СТРОГО в формате JSON с полями:\n- \"answer\": подробный ответ на вопрос\n- \"summary\": краткое резюме в 1-2 предложения\n- \"key_points\": массив из 2-3 ключевых моментов\nВозвращай только валидный JSON, без дополнительного текста.",
@@ -159,6 +163,7 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
             "params": {
                 "model": model_name,
                 "messages": [],
+                "max_completion_tokens": 4096,
                 "temperature": 0.7
             },
             "metadata": {"mode": "meta_prompting", "two_stage": True}
@@ -377,7 +382,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     print(f"{'─' * 70}")
     
     try:
-        base_params = {"model": model_name, "messages": [{"role": "user", "content": user_input}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": user_input}], "max_completion_tokens": 4096, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Размышляю...", flush=True)
         response = client.chat.completions.create(**params)
@@ -406,7 +411,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     
     try:
         step_by_step_prompt = f"{user_input}\n\nРешай пошагово."
-        base_params = {"model": model_name, "messages": [{"role": "user", "content": step_by_step_prompt}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": step_by_step_prompt}], "max_completion_tokens": 4096, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Размышляю пошагово...", flush=True)
         response = client.chat.completions.create(**params)
@@ -435,7 +440,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     
     try:
         meta_request = f"Задача: {user_input}\n\nСоставь оптимальный промпт для решения этой задачи. Выведи только промпт, без дополнительных объяснений."
-        base_params = {"model": model_name, "messages": [{"role": "user", "content": meta_request}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": meta_request}], "max_completion_tokens": 2048, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Создаю промпт...", flush=True)
         meta_response = client.chat.completions.create(**params)
@@ -445,7 +450,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         print(f"\nСгенерированный промпт: {generated_prompt}")
         print(f"\n{'·' * 70}")
         
-        base_params = {"model": model_name, "messages": [{"role": "user", "content": generated_prompt}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": generated_prompt}], "max_completion_tokens": 4096, "temperature": 0.7}
         params = get_model_params(model_name, base_params)
         print("\n🤔 Решаю по промпту...", flush=True)
         response = client.chat.completions.create(**params)
@@ -490,7 +495,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
                 {"role": "system", "content": expert_role},
                 {"role": "user", "content": user_input}
             ]
-            base_params = {"model": model_name, "messages": messages, "temperature": 0.7}
+            base_params = {"model": model_name, "messages": messages, "max_completion_tokens": 4096, "temperature": 0.7}
             params = get_model_params(model_name, base_params)
             print(f"🤔 {expert_name} размышляет...", flush=True)
             response = client.chat.completions.create(**params)
