@@ -24,7 +24,7 @@ def mock_client():
 class TestModels:
     def test_get_available_models_count(self):
         models = get_available_models()
-        assert len(models) == 1, "Should have 1 model (GLM-4.7-Flash)"
+        assert len(models) == 3, "Should have 3 models (2 GLM + 1 OpenAI)"
     
     def test_all_models_have_pricing(self):
         models = get_available_models()
@@ -34,15 +34,27 @@ class TestModels:
             assert model_info["prompt_price"] >= 0
             assert model_info["completion_price"] >= 0
     
-    def test_glm_model_present(self):
+    def test_all_models_present(self):
         models = get_available_models()
         assert "zai-org/GLM-4.7-Flash" in models
+        assert "zai-org/GLM-4.7" in models
+        assert "gpt-5-nano" in models
     
-    def test_glm_model_free(self):
+    def test_glm_models_free(self):
         models = get_available_models()
-        glm_model = models["zai-org/GLM-4.7-Flash"]
-        assert glm_model["prompt_price"] == 0.0
-        assert glm_model["completion_price"] == 0.0
+        for model_key in ["zai-org/GLM-4.7-Flash", "zai-org/GLM-4.7"]:
+            glm_model = models[model_key]
+            assert glm_model["prompt_price"] == 0.0
+            assert glm_model["completion_price"] == 0.0
+    
+    def test_models_have_ids_and_providers(self):
+        models = get_available_models()
+        assert models["zai-org/GLM-4.7-Flash"]["id"] == 1
+        assert models["zai-org/GLM-4.7-Flash"]["provider"] == "cloud_ru"
+        assert models["zai-org/GLM-4.7"]["id"] == 2
+        assert models["zai-org/GLM-4.7"]["provider"] == "cloud_ru"
+        assert models["gpt-5-nano"]["id"] == 3
+        assert models["gpt-5-nano"]["provider"] == "openai"
 
 class TestModes:
     def test_get_available_modes_count(self):

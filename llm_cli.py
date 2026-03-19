@@ -13,9 +13,36 @@ def get_available_models():
             "name": "GLM-4.7-Flash",
             "prompt_price": 0.0,
             "completion_price": 0.0,
-            "description": "Облачная модель GLM-4.7-Flash от Cloud.ru"
+            "description": "Быстрая облачная модель от Cloud.ru",
+            "provider": "cloud_ru",
+            "id": 1
+        },
+        "zai-org/GLM-4.7": {
+            "name": "GLM-4.7",
+            "prompt_price": 0.0,
+            "completion_price": 0.0,
+            "description": "Более мощная модель от Cloud.ru",
+            "provider": "cloud_ru",
+            "id": 2
+        },
+        "gpt-5-nano": {
+            "name": "GPT-5 Nano",
+            "prompt_price": 0.00005,
+            "completion_price": 0.0004,
+            "description": "Компактная версия GPT-5 от OpenAI",
+            "provider": "openai",
+            "id": 3
         }
     }
+
+def get_client_for_model(model_name, clients):
+    """Возвращает соответствующий client в зависимости от провайдера модели"""
+    models = get_available_models()
+    if model_name not in models:
+        model_name = "zai-org/GLM-4.7-Flash"
+    
+    provider = models[model_name]["provider"]
+    return clients[provider]
 
 def calculate_cost(prompt_tokens, completion_tokens, model_name):
     models = get_available_models()
@@ -53,6 +80,21 @@ def log_interaction(log_file, user_input, assistant_response, usage_info, metada
     
     with open(log_file, 'w', encoding='utf-8') as f:
         json.dump(logs, f, ensure_ascii=False, indent=2)
+
+def get_model_params(model_name, base_params):
+    """Адаптирует параметры под конкретную модель"""
+    models = get_available_models()
+    if model_name not in models:
+        model_name = "zai-org/GLM-4.7-Flash"
+    
+    provider = models[model_name]["provider"]
+    params = base_params.copy()
+    
+    # gpt-5-nano не поддерживает temperature != 1
+    if model_name == "gpt-5-nano" and "temperature" in params:
+        del params["temperature"]
+    
+    return params
 
 def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
     return [
@@ -131,7 +173,9 @@ def execute_mode(client, mode, user_input):
     if mode.get('metadata', {}).get('two_stage'):
         return execute_meta_prompting(client, mode, user_input)
     
-    params = mode['params'].copy()
+    # Адаптируем параметры под модель
+    model_name = mode['params']['model']
+    params = get_model_params(model_name, mode['params'])
     messages = [{"role": "user", "content": user_input}]
     
     if 'system_prompt' in mode:
@@ -143,7 +187,8 @@ def execute_mode(client, mode, user_input):
     return response
 
 def execute_meta_prompting(client, mode, user_input):
-    params = mode['params'].copy()
+    model_name = mode['params']['model']
+    params = get_model_params(model_name, mode['params'])
     
     # Этап 1: Определение роли и навыков
     meta_prompt = f"""Проанализируй следующий вопрос и определи:
@@ -288,7 +333,8 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     print(f"{'─' * 70}")
     
     try:
-        params = {"model": model_name, "messages": [{"role": "user", "content": user_input}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": user_input}], "temperature": 0.7}
+        params = get_model_params(model_name, base_params)
         response = client.chat.completions.create(**params)
         answer1 = response.choices[0].message.content
         usage1 = response.usage
@@ -314,7 +360,8 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     
     try:
         step_by_step_prompt = f"{user_input}\n\nРешай пошагово."
-        params = {"model": model_name, "messages": [{"role": "user", "content": step_by_step_prompt}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": step_by_step_prompt}], "temperature": 0.7}
+        params = get_model_params(model_name, base_params)
         response = client.chat.completions.create(**params)
         answer2 = response.choices[0].message.content
         usage2 = response.usage
@@ -340,14 +387,16 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     
     try:
         meta_request = f"Задача: {user_input}\n\nСоставь оптимальный промпт для решения этой задачи. Выведи только промпт, без дополнительных объяснений."
-        params = {"model": model_name, "messages": [{"role": "user", "content": meta_request}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": meta_request}], "temperature": 0.7}
+        params = get_model_params(model_name, base_params)
         meta_response = client.chat.completions.create(**params)
         generated_prompt = meta_response.choices[0].message.content
         
         print(f"\nСгенерированный промпт: {generated_prompt}")
         print(f"\n{'·' * 70}")
         
-        params = {"model": model_name, "messages": [{"role": "user", "content": generated_prompt}], "temperature": 0.7}
+        base_params = {"model": model_name, "messages": [{"role": "user", "content": generated_prompt}], "temperature": 0.7}
+        params = get_model_params(model_name, base_params)
         response = client.chat.completions.create(**params)
         answer3 = response.choices[0].message.content
         usage3_combined = type('obj', (object,), {
@@ -389,7 +438,8 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
                 {"role": "system", "content": expert_role},
                 {"role": "user", "content": user_input}
             ]
-            params = {"model": model_name, "messages": messages, "temperature": 0.7}
+            base_params = {"model": model_name, "messages": messages, "temperature": 0.7}
+            params = get_model_params(model_name, base_params)
             response = client.chat.completions.create(**params)
             expert_answer = response.choices[0].message.content
             total_tokens_experts += response.usage.total_tokens
@@ -495,15 +545,25 @@ def interactive_mode_selection(client, user_input, log_file, mode_id, model_name
         return None
 
 def main():
-    api_key = os.getenv("CLOUD_API_KEY")
+    # Проверка ключей API
+    cloud_api_key = os.getenv("CLOUD_API_KEY")
+    openai_api_key = os.getenv("OPENAI_API_KEY")
     
-    if not api_key:
-        print("Error: CLOUD_API_KEY not found in environment variables")
-        print("Please create .env file with your API key")
+    if not cloud_api_key and not openai_api_key:
+        print("Error: Neither CLOUD_API_KEY nor OPENAI_API_KEY found")
+        print("Please create .env file with at least one API key")
         return
     
-    base_url = "https://foundation-models.api.cloud.ru/v1"
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    # Создание клиентов для разных провайдеров
+    clients = {}
+    
+    if cloud_api_key:
+        cloud_url = "https://foundation-models.api.cloud.ru/v1"
+        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=60.0)
+    
+    if openai_api_key:
+        clients["openai"] = OpenAI(api_key=openai_api_key, timeout=60.0)
+    
     log_file = setup_logging()
     
     print("LLM CLI Utility (Optimized for cost efficiency)")
@@ -516,7 +576,7 @@ def main():
     print("  'models' - показать список моделей")
     print("  'model <name>' - переключиться на модель")
     print("\nТекущий режим: Стандартный (без ограничений)")
-    print("Текущая модель: GLM-4.7-Flash (Cloud.ru)")
+    print("Текущая модель: GPT-5 Nano (OpenAI)")
     print(f"Логи сохраняются в: {log_file}")
     print("-" * 50)
     
@@ -524,7 +584,7 @@ def main():
     total_completion_tokens = 0
     total_cost = 0.0
     current_mode_id = 1
-    current_model = "zai-org/GLM-4.7-Flash"
+    current_model = "gpt-5-nano"
     
     while True:
         user_input = input("\nYou: ").strip()
@@ -577,12 +637,14 @@ def main():
         if user_input.lower() == 'compare':
             task_input = input("Введите запрос для сравнения: ").strip()
             if task_input:
+                client = get_client_for_model(current_model, clients)
                 compare_formatting_modes(client, task_input, log_file, current_model)
             continue
         
         if user_input.lower() == 'reasoning':
             task_input = input("Введите задачу для сравнения способов рассуждения: ").strip()
             if task_input:
+                client = get_client_for_model(current_model, clients)
                 compare_reasoning_approaches(client, task_input, log_file, current_model)
             continue
         
@@ -599,7 +661,34 @@ def main():
         if not user_input:
             continue
         
+        # Выбор модели перед запросом
+        print("\nВыберите модель:")
+        models = get_available_models()
+        # Фильтруем модели по доступности провайдеров
+        available_models = {k: v for k, v in models.items() if v["provider"] in clients}
+        for model_key, model_info in available_models.items():
+            marker = "★" if model_key == current_model else " "
+            print(f"{marker} {model_info['id']}. {model_info['name']} - {model_info['description']}")
+        
+        model_choice = input("Модель (1, 2 или 3, Enter = текущая): ").strip()
+        
+        if model_choice:
+            selected_model = None
+            for model_key, model_info in models.items():
+                if str(model_info['id']) == model_choice:
+                    selected_model = model_key
+                    break
+            
+            if selected_model:
+                current_model = selected_model
+                print(f"✓ Выбрана модель: {models[current_model]['name']}")
+            else:
+                print(f"Используется текущая модель: {models[current_model]['name']}")
+        else:
+            print(f"Используется текущая модель: {models[current_model]['name']}")
+        
         try:
+            client = get_client_for_model(current_model, clients)
             usage_info = interactive_mode_selection(client, user_input, log_file, current_mode_id, current_model)
             
             if usage_info:
