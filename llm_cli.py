@@ -168,10 +168,10 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
 def count_words(text):
     return len(text.split())
 
-def execute_mode(client, mode, user_input):
+def execute_mode(client, mode, user_input, max_retries=3):
     # Режим 6: метапромптинг с двумя этапами
     if mode.get('metadata', {}).get('two_stage'):
-        return execute_meta_prompting(client, mode, user_input)
+        return execute_meta_prompting(client, mode, user_input, max_retries)
     
     # Адаптируем параметры под модель
     model_name = mode['params']['model']
@@ -183,10 +183,20 @@ def execute_mode(client, mode, user_input):
     
     params['messages'] = messages
     
-    response = client.chat.completions.create(**params)
-    return response
+    # Retry механизм для нестабильных API
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(**params)
+            return response
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"\n⚠️ Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
+                import time
+                time.sleep(2)
+            else:
+                raise
 
-def execute_meta_prompting(client, mode, user_input):
+def execute_meta_prompting(client, mode, user_input, max_retries=3):
     model_name = mode['params']['model']
     params = get_model_params(model_name, mode['params'])
     
@@ -204,7 +214,20 @@ def execute_meta_prompting(client, mode, user_input):
 НАВЫКИ: [список навыков через запятую]"""
     
     params['messages'] = [{"role": "user", "content": meta_prompt}]
-    meta_response = client.chat.completions.create(**params)
+    
+    # Retry для этапа 1
+    for attempt in range(max_retries):
+        try:
+            meta_response = client.chat.completions.create(**params)
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"\n⚠️ Этап 1: Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
+                import time
+                time.sleep(2)
+            else:
+                raise
+    
     meta_analysis = meta_response.choices[0].message.content
     
     # Этап 2: Ответ с учетом определенной роли
@@ -217,7 +240,19 @@ def execute_meta_prompting(client, mode, user_input):
 {user_input}"""
     
     params['messages'] = [{"role": "user", "content": enriched_prompt}]
-    final_response = client.chat.completions.create(**params)
+    
+    # Retry для этапа 2
+    for attempt in range(max_retries):
+        try:
+            final_response = client.chat.completions.create(**params)
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"\n⚠️ Этап 2: Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
+                import time
+                time.sleep(2)
+            else:
+                raise
     
     # Объединяем usage из обоих запросов
     combined_usage = type('obj', (object,), {
@@ -433,7 +468,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         total_tokens_experts = 0
         
         for expert_name, expert_role in experts:
-            print(f"\n[{expert_name}]")
+            print(f"\n[{expert_name}]", flush=True)
             messages = [
                 {"role": "system", "content": expert_role},
                 {"role": "user", "content": user_input}
@@ -444,7 +479,8 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
             expert_answer = response.choices[0].message.content
             total_tokens_experts += response.usage.total_tokens
             
-            print(f"{expert_answer}")
+            print(expert_answer, flush=True)
+            print(f"(Токены: {response.usage.total_tokens})", flush=True)
             expert_answers.append(f"[{expert_name}]: {expert_answer}")
         
         combined_answer = "\n\n".join(expert_answers)
@@ -559,7 +595,7 @@ def main():
     
     if cloud_api_key:
         cloud_url = "https://foundation-models.api.cloud.ru/v1"
-        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=60.0)
+        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=120.0)
     
     if openai_api_key:
         clients["openai"] = OpenAI(api_key=openai_api_key, timeout=60.0)
