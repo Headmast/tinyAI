@@ -273,6 +273,170 @@ def compare_formatting_modes(client, user_input, log_file, model_name="zai-org/G
     
     return results
 
+def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-org/GLM-4.7-Flash"):
+    print("\n" + "=" * 70)
+    print("ДЕНЬ 3: СРАВНЕНИЕ СПОСОБОВ РАССУЖДЕНИЯ")
+    print(f"Используемая модель: {get_available_models()[model_name]['name']}")
+    print(f"Задача: {user_input}")
+    print("=" * 70)
+    
+    results = []
+    
+    # Способ 1: Прямой ответ (без дополнительных инструкций)
+    print(f"\n{'─' * 70}")
+    print("СПОСОБ 1: Прямой ответ (без дополнительных инструкций)")
+    print(f"{'─' * 70}")
+    
+    try:
+        params = {"model": model_name, "messages": [{"role": "user", "content": user_input}], "temperature": 0.7}
+        response = client.chat.completions.create(**params)
+        answer1 = response.choices[0].message.content
+        usage1 = response.usage
+        
+        print(f"\nОтвет: {answer1}")
+        print("\n[Конец ответа]")
+        print(f"\nСтатистика: Токены: {usage1.total_tokens} | Слова: {count_words(answer1)}")
+        
+        results.append({
+            "method": "Прямой ответ",
+            "response": answer1,
+            "tokens": usage1.total_tokens,
+            "words": count_words(answer1),
+            "chars": len(answer1)
+        })
+    except Exception as e:
+        print(f"\n❌ Ошибка: {str(e)}")
+    
+    # Способ 2: С инструкцией "решай пошагово"
+    print(f"\n{'─' * 70}")
+    print("СПОСОБ 2: С инструкцией 'решай пошагово'")
+    print(f"{'─' * 70}")
+    
+    try:
+        step_by_step_prompt = f"{user_input}\n\nРешай пошагово."
+        params = {"model": model_name, "messages": [{"role": "user", "content": step_by_step_prompt}], "temperature": 0.7}
+        response = client.chat.completions.create(**params)
+        answer2 = response.choices[0].message.content
+        usage2 = response.usage
+        
+        print(f"\nОтвет: {answer2}")
+        print("\n[Конец ответа]")
+        print(f"\nСтатистика: Токены: {usage2.total_tokens} | Слова: {count_words(answer2)}")
+        
+        results.append({
+            "method": "Пошаговое решение",
+            "response": answer2,
+            "tokens": usage2.total_tokens,
+            "words": count_words(answer2),
+            "chars": len(answer2)
+        })
+    except Exception as e:
+        print(f"\n❌ Ошибка: {str(e)}")
+    
+    # Способ 3: Метапромпт (сначала создаем промпт, потом решаем)
+    print(f"\n{'─' * 70}")
+    print("СПОСОБ 3: Метапромпт (сначала создание промпта, затем решение)")
+    print(f"{'─' * 70}")
+    
+    try:
+        meta_request = f"Задача: {user_input}\n\nСоставь оптимальный промпт для решения этой задачи. Выведи только промпт, без дополнительных объяснений."
+        params = {"model": model_name, "messages": [{"role": "user", "content": meta_request}], "temperature": 0.7}
+        meta_response = client.chat.completions.create(**params)
+        generated_prompt = meta_response.choices[0].message.content
+        
+        print(f"\nСгенерированный промпт: {generated_prompt}")
+        print(f"\n{'·' * 70}")
+        
+        params = {"model": model_name, "messages": [{"role": "user", "content": generated_prompt}], "temperature": 0.7}
+        response = client.chat.completions.create(**params)
+        answer3 = response.choices[0].message.content
+        usage3_combined = type('obj', (object,), {
+            'total_tokens': meta_response.usage.total_tokens + response.usage.total_tokens
+        })
+        
+        print(f"\nОтвет: {answer3}")
+        print("\n[Конец ответа]")
+        print(f"\nСтатистика: Токены: {usage3_combined.total_tokens} | Слова: {count_words(answer3)}")
+        
+        results.append({
+            "method": "Метапромпт",
+            "response": f"[Промпт: {generated_prompt}]\n\n{answer3}",
+            "tokens": usage3_combined.total_tokens,
+            "words": count_words(answer3),
+            "chars": len(answer3)
+        })
+    except Exception as e:
+        print(f"\n❌ Ошибка: {str(e)}")
+    
+    # Способ 4: Группа экспертов
+    print(f"\n{'─' * 70}")
+    print("СПОСОБ 4: Группа экспертов (аналитик, инженер, критик)")
+    print(f"{'─' * 70}")
+    
+    try:
+        experts = [
+            ("Аналитик", "Ты - аналитик. Проанализируй задачу и предложи решение с точки зрения анализа данных и логики."),
+            ("Инженер", "Ты - инженер. Реши задачу с технической и практической точки зрения."),
+            ("Критик", "Ты - критик. Оцени задачу критически, найди возможные проблемы и предложи решение.")
+        ]
+        
+        expert_answers = []
+        total_tokens_experts = 0
+        
+        for expert_name, expert_role in experts:
+            print(f"\n[{expert_name}]")
+            messages = [
+                {"role": "system", "content": expert_role},
+                {"role": "user", "content": user_input}
+            ]
+            params = {"model": model_name, "messages": messages, "temperature": 0.7}
+            response = client.chat.completions.create(**params)
+            expert_answer = response.choices[0].message.content
+            total_tokens_experts += response.usage.total_tokens
+            
+            print(f"{expert_answer}")
+            expert_answers.append(f"[{expert_name}]: {expert_answer}")
+        
+        combined_answer = "\n\n".join(expert_answers)
+        
+        print("\n[Конец ответа]")
+        print(f"\nСтатистика: Токены: {total_tokens_experts} | Слова: {count_words(combined_answer)}")
+        
+        results.append({
+            "method": "Группа экспертов",
+            "response": combined_answer,
+            "tokens": total_tokens_experts,
+            "words": count_words(combined_answer),
+            "chars": len(combined_answer)
+        })
+    except Exception as e:
+        print(f"\n❌ Ошибка: {str(e)}")
+    
+    # Сводка сравнения
+    print("\n" + "=" * 70)
+    print("СВОДКА СРАВНЕНИЯ СПОСОБОВ РАССУЖДЕНИЯ")
+    print("=" * 70)
+    
+    for result in results:
+        print(f"\n{result['method']}:")
+        print(f"  Символов: {result['chars']}")
+        print(f"  Слов: {result['words']}")
+        print(f"  Токенов: {result['tokens']}")
+    
+    if results:
+        print("\n" + "─" * 70)
+        print("АНАЛИЗ:")
+        min_tokens = min(r['tokens'] for r in results)
+        max_tokens = max(r['tokens'] for r in results)
+        min_words = min(r['words'] for r in results)
+        max_words = max(r['words'] for r in results)
+        print(f"  Разброс по токенам: {min_tokens} - {max_tokens}")
+        print(f"  Разброс по словам: {min_words} - {max_words}")
+        print(f"  Самый краткий: {min(results, key=lambda x: x['words'])['method']}")
+        print(f"  Самый подробный: {max(results, key=lambda x: x['words'])['method']}")
+    
+    return results
+
 def interactive_mode_selection(client, user_input, log_file, mode_id, model_name="zai-org/GLM-4.7-Flash"):
     modes = get_available_modes(model_name)
     selected_mode = None
@@ -346,6 +510,7 @@ def main():
     print("\nДоступные команды:")
     print("  'quit' / 'exit' / 'q' - выход")
     print("  'compare' - сравнение всех режимов")
+    print("  'reasoning' - сравнение способов рассуждения (День 3)")
     print("  'modes' - показать список режимов")
     print("  'mode N' - переключиться на режим N (1-6)")
     print("  'models' - показать список моделей")
@@ -410,9 +575,15 @@ def main():
             continue
         
         if user_input.lower() == 'compare':
-            compare_input = input("Введите запрос для сравнения: ").strip()
-            if compare_input:
-                compare_formatting_modes(client, compare_input, log_file, current_model)
+            task_input = input("Введите запрос для сравнения: ").strip()
+            if task_input:
+                compare_formatting_modes(client, task_input, log_file, current_model)
+            continue
+        
+        if user_input.lower() == 'reasoning':
+            task_input = input("Введите задачу для сравнения способов рассуждения: ").strip()
+            if task_input:
+                compare_reasoning_approaches(client, task_input, log_file, current_model)
             continue
         
         if user_input.lower() in ['quit', 'exit', 'q']:
