@@ -186,11 +186,14 @@ def execute_mode(client, mode, user_input, max_retries=3):
     # Retry механизм для нестабильных API
     for attempt in range(max_retries):
         try:
+            print("🤔 Размышляю...", flush=True)
             response = client.chat.completions.create(**params)
+            print("\r✓ Ответ получен!    ", flush=True)
             return response
         except Exception as e:
+            print("\r", end="", flush=True)
             if attempt < max_retries - 1:
-                print(f"\n⚠️ Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
+                print(f"⚠️ Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
                 import time
                 time.sleep(2)
             else:
@@ -218,11 +221,14 @@ def execute_meta_prompting(client, mode, user_input, max_retries=3):
     # Retry для этапа 1
     for attempt in range(max_retries):
         try:
+            print("🤔 Этап 1: Анализирую задачу...", flush=True)
             meta_response = client.chat.completions.create(**params)
+            print("\r✓ Этап 1 завершен!        ", flush=True)
             break
         except Exception as e:
+            print("\r", end="", flush=True)
             if attempt < max_retries - 1:
-                print(f"\n⚠️ Этап 1: Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
+                print(f"⚠️ Этап 1: Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
                 import time
                 time.sleep(2)
             else:
@@ -244,11 +250,14 @@ def execute_meta_prompting(client, mode, user_input, max_retries=3):
     # Retry для этапа 2
     for attempt in range(max_retries):
         try:
+            print("🤔 Этап 2: Формирую экспертный ответ...", flush=True)
             final_response = client.chat.completions.create(**params)
+            print("\r✓ Этап 2 завершен!              ", flush=True)
             break
         except Exception as e:
+            print("\r", end="", flush=True)
             if attempt < max_retries - 1:
-                print(f"\n⚠️ Этап 2: Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
+                print(f"⚠️ Этап 2: Попытка {attempt + 1} не удалась, повтор через 2 сек...", flush=True)
                 import time
                 time.sleep(2)
             else:
@@ -370,7 +379,9 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
     try:
         base_params = {"model": model_name, "messages": [{"role": "user", "content": user_input}], "temperature": 0.7}
         params = get_model_params(model_name, base_params)
+        print("\n🤔 Размышляю...", flush=True)
         response = client.chat.completions.create(**params)
+        print("\r✓ Готово!      ", flush=True)
         answer1 = response.choices[0].message.content
         usage1 = response.usage
         
@@ -397,7 +408,9 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         step_by_step_prompt = f"{user_input}\n\nРешай пошагово."
         base_params = {"model": model_name, "messages": [{"role": "user", "content": step_by_step_prompt}], "temperature": 0.7}
         params = get_model_params(model_name, base_params)
+        print("\n🤔 Размышляю пошагово...", flush=True)
         response = client.chat.completions.create(**params)
+        print("\r✓ Готово!               ", flush=True)
         answer2 = response.choices[0].message.content
         usage2 = response.usage
         
@@ -424,7 +437,9 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         meta_request = f"Задача: {user_input}\n\nСоставь оптимальный промпт для решения этой задачи. Выведи только промпт, без дополнительных объяснений."
         base_params = {"model": model_name, "messages": [{"role": "user", "content": meta_request}], "temperature": 0.7}
         params = get_model_params(model_name, base_params)
+        print("\n🤔 Создаю промпт...", flush=True)
         meta_response = client.chat.completions.create(**params)
+        print("\r✓ Промпт создан!    ", flush=True)
         generated_prompt = meta_response.choices[0].message.content
         
         print(f"\nСгенерированный промпт: {generated_prompt}")
@@ -432,7 +447,9 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         
         base_params = {"model": model_name, "messages": [{"role": "user", "content": generated_prompt}], "temperature": 0.7}
         params = get_model_params(model_name, base_params)
+        print("\n🤔 Решаю по промпту...", flush=True)
         response = client.chat.completions.create(**params)
+        print("\r✓ Готово!              ", flush=True)
         answer3 = response.choices[0].message.content
         usage3_combined = type('obj', (object,), {
             'total_tokens': meta_response.usage.total_tokens + response.usage.total_tokens
@@ -475,7 +492,9 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
             ]
             base_params = {"model": model_name, "messages": messages, "temperature": 0.7}
             params = get_model_params(model_name, base_params)
+            print(f"🤔 {expert_name} размышляет...", flush=True)
             response = client.chat.completions.create(**params)
+            print(f"\r✓ {expert_name} ответил!        ", flush=True)
             expert_answer = response.choices[0].message.content
             total_tokens_experts += response.usage.total_tokens
             
@@ -595,7 +614,7 @@ def main():
     
     if cloud_api_key:
         cloud_url = "https://foundation-models.api.cloud.ru/v1"
-        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=120.0)
+        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=240.0)
     
     if openai_api_key:
         clients["openai"] = OpenAI(api_key=openai_api_key, timeout=60.0)
