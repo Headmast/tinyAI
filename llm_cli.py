@@ -291,7 +291,10 @@ def interactive_mode_selection(client, user_input, log_file, mode_id, model_name
         print(f"Системный промпт: {selected_mode['system_prompt']}")
     
     try:
+        print(f"\nОтправка запроса к API...")
+        print(f"Модель: {selected_mode['params']['model']}")
         response = execute_mode(client, selected_mode, user_input)
+        print(f"Ответ получен!")
         assistant_message = response.choices[0].message.content
         usage = response.usage
         
@@ -319,7 +322,12 @@ def interactive_mode_selection(client, user_input, log_file, mode_id, model_name
         return usage_info
         
     except Exception as e:
-        print(f"\nОшибка: {str(e)}")
+        print(f"\n❌ Ошибка при выполнении запроса:")
+        print(f"Тип ошибки: {type(e).__name__}")
+        print(f"Сообщение: {str(e)}")
+        import traceback
+        print(f"\nПолный traceback:")
+        traceback.print_exc()
         return None
 
 def main():
