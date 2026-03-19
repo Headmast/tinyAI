@@ -614,7 +614,7 @@ def main():
     
     if cloud_api_key:
         cloud_url = "https://foundation-models.api.cloud.ru/v1"
-        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=240.0)
+        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=60.0)
     
     if openai_api_key:
         clients["openai"] = OpenAI(api_key=openai_api_key, timeout=60.0)
