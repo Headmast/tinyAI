@@ -9,54 +9,18 @@ load_dotenv()
 
 def get_available_models():
     return {
-        "gpt-3.5-turbo": {
-            "name": "GPT-3.5 Turbo",
-            "prompt_price": 0.0015,
-            "completion_price": 0.002,
-            "description": "Быстрая и экономичная модель"
-        },
-        "gpt-4o-mini": {
-            "name": "GPT-4o Mini",
-            "prompt_price": 0.00015,
-            "completion_price": 0.0006,
-            "description": "Самая экономичная модель GPT-4 класса"
-        },
-        "gpt-4o": {
-            "name": "GPT-4o",
-            "prompt_price": 0.005,
-            "completion_price": 0.015,
-            "description": "Оптимизированная GPT-4, баланс цены и качества"
-        },
-        "gpt-4-turbo": {
-            "name": "GPT-4 Turbo",
-            "prompt_price": 0.01,
-            "completion_price": 0.03,
-            "description": "Быстрая версия GPT-4"
-        },
-        "gpt-4": {
-            "name": "GPT-4",
-            "prompt_price": 0.03,
-            "completion_price": 0.06,
-            "description": "Наиболее мощная модель, высокая стоимость"
-        },
-        "gpt-5.4": {
-            "name": "GPT-5.4",
-            "prompt_price": 0.0025,
-            "completion_price": 0.015,
-            "description": "Новейшая модель GPT-5, высокая производительность"
-        },
-        "gpt-5-nano": {
-            "name": "GPT-5 Nano",
-            "prompt_price": 0.00005,
-            "completion_price": 0.0004,
-            "description": "Компактная версия GPT-5, оптимальное соотношение цены и качества"
+        "zai-org/GLM-4.7-Flash": {
+            "name": "GLM-4.7-Flash",
+            "prompt_price": 0.0,
+            "completion_price": 0.0,
+            "description": "Облачная модель GLM-4.7-Flash от Cloud.ru"
         }
     }
 
 def calculate_cost(prompt_tokens, completion_tokens, model_name):
     models = get_available_models()
     if model_name not in models:
-        model_name = "gpt-3.5-turbo"
+        model_name = "zai-org/GLM-4.7-Flash"
     
     model = models[model_name]
     prompt_cost = (prompt_tokens * model["prompt_price"]) / 1000
@@ -90,7 +54,7 @@ def log_interaction(log_file, user_input, assistant_response, usage_info, metada
     with open(log_file, 'w', encoding='utf-8') as f:
         json.dump(logs, f, ensure_ascii=False, indent=2)
 
-def get_available_modes(model_name="gpt-3.5-turbo"):
+def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
     return [
         {
             "id": 1,
@@ -146,6 +110,16 @@ def get_available_modes(model_name="gpt-3.5-turbo"):
             },
             "system_prompt": "Отвечай СТРОГО в формате JSON с полями:\n- \"answer\": подробный ответ на вопрос\n- \"summary\": краткое резюме в 1-2 предложения\n- \"key_points\": массив из 2-3 ключевых моментов\nВозвращай только валидный JSON, без дополнительного текста.",
             "metadata": {"mode": "json_format", "format": "JSON with answer, summary, and key_points"}
+        },
+        {
+            "id": 6,
+            "name": "С метапромптингом (двухэтапный)",
+            "params": {
+                "model": model_name,
+                "messages": [],
+                "temperature": 0.7
+            },
+            "metadata": {"mode": "meta_prompting", "two_stage": True}
         }
     ]
 
@@ -153,6 +127,10 @@ def count_words(text):
     return len(text.split())
 
 def execute_mode(client, mode, user_input):
+    # Режим 6: метапромптинг с двумя этапами
+    if mode.get('metadata', {}).get('two_stage'):
+        return execute_meta_prompting(client, mode, user_input)
+    
     params = mode['params'].copy()
     messages = [{"role": "user", "content": user_input}]
     
@@ -164,7 +142,55 @@ def execute_mode(client, mode, user_input):
     response = client.chat.completions.create(**params)
     return response
 
-def compare_formatting_modes(client, user_input, log_file, model_name="gpt-3.5-turbo"):
+def execute_meta_prompting(client, mode, user_input):
+    params = mode['params'].copy()
+    
+    # Этап 1: Определение роли и навыков
+    meta_prompt = f"""Проанализируй следующий вопрос и определи:
+1. Какая роль/профессия лучше всего ответит на этот вопрос?
+2. Какая предметная область затрагивается?
+3. Какие ключевые навыки и знания нужны для ответа?
+
+Вопрос: {user_input}
+
+Ответь кратко в формате:
+РОЛЬ: [роль]
+ОБЛАСТЬ: [предметная область]
+НАВЫКИ: [список навыков через запятую]"""
+    
+    params['messages'] = [{"role": "user", "content": meta_prompt}]
+    meta_response = client.chat.completions.create(**params)
+    meta_analysis = meta_response.choices[0].message.content
+    
+    # Этап 2: Ответ с учетом определенной роли
+    enriched_prompt = f"""Ты - эксперт со следующими характеристиками:
+
+{meta_analysis}
+
+Используя эти знания и навыки, ответь на вопрос максимально качественно и профессионально:
+
+{user_input}"""
+    
+    params['messages'] = [{"role": "user", "content": enriched_prompt}]
+    final_response = client.chat.completions.create(**params)
+    
+    # Объединяем usage из обоих запросов
+    combined_usage = type('obj', (object,), {
+        'prompt_tokens': meta_response.usage.prompt_tokens + final_response.usage.prompt_tokens,
+        'completion_tokens': meta_response.usage.completion_tokens + final_response.usage.completion_tokens,
+        'total_tokens': meta_response.usage.total_tokens + final_response.usage.total_tokens
+    })
+    
+    # Добавляем метаанализ в начало ответа
+    enriched_content = f"[МЕТААНАЛИЗ]\n{meta_analysis}\n\n[ОТВЕТ]\n{final_response.choices[0].message.content}"
+    
+    # Создаем объект ответа с обогащенным контентом
+    final_response.choices[0].message.content = enriched_content
+    final_response.usage = combined_usage
+    
+    return final_response
+
+def compare_formatting_modes(client, user_input, log_file, model_name="zai-org/GLM-4.7-Flash"):
     print("\n" + "=" * 70)
     print("РЕЖИМ СРАВНЕНИЯ: отправка одного запроса с разными параметрами")
     print(f"Используемая модель: {get_available_models()[model_name]['name']}")
@@ -202,6 +228,7 @@ def compare_formatting_modes(client, user_input, log_file, model_name="gpt-3.5-t
             }
             
             print(f"\nОтвет: {assistant_message}")
+            print("\n[Конец ответа]")
             print(f"\nСтатистика:")
             print(f"  Токены: {total_tokens} (prompt: {prompt_tokens}, completion: {completion_tokens})")
             print(f"  Слов: {word_count}")
@@ -246,7 +273,7 @@ def compare_formatting_modes(client, user_input, log_file, model_name="gpt-3.5-t
     
     return results
 
-def interactive_mode_selection(client, user_input, log_file, mode_id, model_name="gpt-3.5-turbo"):
+def interactive_mode_selection(client, user_input, log_file, mode_id, model_name="zai-org/GLM-4.7-Flash"):
     modes = get_available_modes(model_name)
     selected_mode = None
     
@@ -296,14 +323,15 @@ def interactive_mode_selection(client, user_input, log_file, mode_id, model_name
         return None
 
 def main():
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("CLOUD_API_KEY")
     
     if not api_key:
-        print("Error: OPENAI_API_KEY not found in environment variables")
+        print("Error: CLOUD_API_KEY not found in environment variables")
         print("Please create .env file with your API key")
         return
     
-    client = OpenAI(api_key=api_key)
+    base_url = "https://foundation-models.api.cloud.ru/v1"
+    client = OpenAI(api_key=api_key, base_url=base_url)
     log_file = setup_logging()
     
     print("LLM CLI Utility (Optimized for cost efficiency)")
@@ -311,11 +339,11 @@ def main():
     print("  'quit' / 'exit' / 'q' - выход")
     print("  'compare' - сравнение всех режимов")
     print("  'modes' - показать список режимов")
-    print("  'mode N' - переключиться на режим N (1-5)")
+    print("  'mode N' - переключиться на режим N (1-6)")
     print("  'models' - показать список моделей")
     print("  'model <name>' - переключиться на модель")
     print("\nТекущий режим: Стандартный (без ограничений)")
-    print("Текущая модель: GPT-3.5 Turbo")
+    print("Текущая модель: GLM-4.7-Flash (Cloud.ru)")
     print(f"Логи сохраняются в: {log_file}")
     print("-" * 50)
     
@@ -323,7 +351,7 @@ def main():
     total_completion_tokens = 0
     total_cost = 0.0
     current_mode_id = 1
-    current_model = "gpt-3.5-turbo"
+    current_model = "zai-org/GLM-4.7-Flash"
     
     while True:
         user_input = input("\nYou: ").strip()
