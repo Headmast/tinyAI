@@ -173,6 +173,37 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
 def count_words(text):
     return len(text.split())
 
+def stream_response(client, params, show_thinking=True):
+    """Потоковый вывод ответа с поэтапной печатью"""
+    import sys
+    
+    # Включаем streaming
+    params['stream'] = True
+    
+    full_response = ""
+    print("\n", flush=True)
+    
+    try:
+        stream = client.chat.completions.create(**params)
+        
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                full_response += content
+                print(content, end="", flush=True)
+        
+        print("\n", flush=True)
+        
+        # Возвращаем полный ответ для логирования
+        return full_response
+        
+    except Exception as e:
+        print(f"\n❌ Ошибка при streaming: {str(e)}", flush=True)
+        # Fallback на обычный режим
+        params['stream'] = False
+        response = client.chat.completions.create(**params)
+        return response.choices[0].message.content
+
 def execute_mode(client, mode, user_input, max_retries=3):
     # Режим 6: метапромптинг с двумя этапами
     if mode.get('metadata', {}).get('two_stage'):
@@ -192,9 +223,34 @@ def execute_mode(client, mode, user_input, max_retries=3):
     for attempt in range(max_retries):
         try:
             print("🤔 Размышляю...", flush=True)
-            response = client.chat.completions.create(**params)
-            print("\r✓ Ответ получен!    ", flush=True)
-            return response
+            
+            # Используем streaming для постепенного вывода
+            answer_text = stream_response(client, params.copy())
+            
+            # Создаём объект ответа для совместимости
+            # Делаем обычный запрос для получения usage статистики
+            params_for_usage = params.copy()
+            params_for_usage['max_completion_tokens'] = 1  # Минимальный запрос для статистики
+            usage_response = client.chat.completions.create(**params_for_usage)
+            
+            # Создаём mock объект с ответом
+            class MockResponse:
+                def __init__(self, content, usage):
+                    self.choices = [type('obj', (object,), {
+                        'message': type('obj', (object,), {'content': content})()
+                    })()]
+                    self.usage = usage
+            
+            # Примерная оценка токенов (1 токен ≈ 4 символа)
+            estimated_tokens = len(answer_text) // 4
+            mock_usage = type('obj', (object,), {
+                'prompt_tokens': usage_response.usage.prompt_tokens,
+                'completion_tokens': estimated_tokens,
+                'total_tokens': usage_response.usage.prompt_tokens + estimated_tokens
+            })()
+            
+            return MockResponse(answer_text, mock_usage)
+            
         except Exception as e:
             print("\r", end="", flush=True)
             if attempt < max_retries - 1:
