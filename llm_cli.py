@@ -27,8 +27,9 @@ def get_available_models():
         },
         "gpt-5-nano": {
             "name": "GPT-5 Nano",
-            "prompt_price": 0.00005,
-            "completion_price": 0.0004,
+            "prompt_price": 0.0002,
+            "completion_price": 0.00125,
+            "cached_prompt_price": 0.00002,
             "description": "Компактная версия GPT-5 от OpenAI",
             "provider": "openai",
             "id": 3
@@ -37,9 +38,19 @@ def get_available_models():
             "name": "GPT-5.4",
             "prompt_price": 0.0025,
             "completion_price": 0.015,
+            "cached_prompt_price": 0.00025,
             "description": "Новейшая модель GPT-5, высокая производительность",
             "provider": "openai",
             "id": 4
+        },
+        "gpt-5.4-mini": {
+            "name": "GPT-5.4 Mini",
+            "prompt_price": 0.00075,
+            "completion_price": 0.0045,
+            "cached_prompt_price": 0.00008,
+            "description": "Облегченная версия GPT-5.4, оптимальная для большинства задач",
+            "provider": "openai",
+            "id": 5
         }
     }
 

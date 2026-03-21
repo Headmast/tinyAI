@@ -13,18 +13,34 @@ from llm_cli import (
 @pytest.fixture
 def mock_client():
     client = MagicMock()
-    response = MagicMock()
-    response.choices[0].message.content = "Test response from model"
-    response.usage.prompt_tokens = 15
-    response.usage.completion_tokens = 25
-    response.usage.total_tokens = 40
-    client.chat.completions.create.return_value = response
+    
+    # Mock для streaming ответа
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta = MagicMock()
+    mock_chunk.choices[0].delta.content = "Test response from model"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    
+    # Mock для usage запроса
+    usage_response = MagicMock()
+    usage_response.usage.prompt_tokens = 15
+    usage_response.usage.completion_tokens = 25
+    usage_response.usage.total_tokens = 40
+    
+    # Настраиваем возврат разных значений для разных вызовов
+    def create_side_effect(**kwargs):
+        if kwargs.get('stream'):
+            return iter([mock_chunk])
+        else:
+            return usage_response
+    
+    client.chat.completions.create.side_effect = create_side_effect
     return client
 
 class TestModels:
     def test_get_available_models_count(self):
         models = get_available_models()
-        assert len(models) == 3, "Should have 3 models (2 GLM + 1 OpenAI)"
+        assert len(models) == 5, "Should have 5 models (2 GLM + 3 OpenAI)"
     
     def test_all_models_have_pricing(self):
         models = get_available_models()
@@ -39,6 +55,8 @@ class TestModels:
         assert "zai-org/GLM-4.7-Flash" in models
         assert "zai-org/GLM-4.7" in models
         assert "gpt-5-nano" in models
+        assert "gpt-5.4" in models
+        assert "gpt-5.4-mini" in models
     
     def test_glm_models_free(self):
         models = get_available_models()
@@ -55,6 +73,18 @@ class TestModels:
         assert models["zai-org/GLM-4.7"]["provider"] == "cloud_ru"
         assert models["gpt-5-nano"]["id"] == 3
         assert models["gpt-5-nano"]["provider"] == "openai"
+        assert models["gpt-5.4"]["id"] == 4
+        assert models["gpt-5.4"]["provider"] == "openai"
+        assert models["gpt-5.4-mini"]["id"] == 5
+        assert models["gpt-5.4-mini"]["provider"] == "openai"
+    
+    def test_gpt54_mini_pricing(self):
+        models = get_available_models()
+        mini = models["gpt-5.4-mini"]
+        assert mini["prompt_price"] == 0.00075
+        assert mini["completion_price"] == 0.0045
+        assert mini["prompt_price"] < models["gpt-5.4"]["prompt_price"]
+        assert mini["completion_price"] < models["gpt-5.4"]["completion_price"]
 
 class TestModes:
     def test_get_available_modes_count(self):
@@ -170,6 +200,35 @@ class TestMetaPrompting:
         assert "[МЕТААНАЛИЗ]" in content
         assert "[ОТВЕТ]" in content
 
+class TestTemperatureParameters:
+    def test_modes_have_temperature(self):
+        modes = get_available_modes()
+        for mode in modes:
+            if mode["id"] != 6:
+                assert "temperature" in mode["params"]
+                assert mode["params"]["temperature"] == 0.7
+    
+    def test_temperature_range_valid(self):
+        modes = get_available_modes()
+        for mode in modes:
+            if "temperature" in mode["params"]:
+                temp = mode["params"]["temperature"]
+                assert 0 <= temp <= 2.0, f"Temperature {temp} out of valid range"
+    
+    def test_gpt5_nano_no_temperature_support(self):
+        from llm_cli import get_model_params
+        params = {"model": "gpt-5-nano", "temperature": 0.7, "max_completion_tokens": 100}
+        adapted = get_model_params("gpt-5-nano", params)
+        assert "temperature" not in adapted, "gpt-5-nano should not have temperature parameter"
+    
+    def test_other_models_keep_temperature(self):
+        from llm_cli import get_model_params
+        for model_name in ["gpt-5.4", "gpt-5.4-mini", "zai-org/GLM-4.7-Flash"]:
+            params = {"model": model_name, "temperature": 0.7, "max_completion_tokens": 100}
+            adapted = get_model_params(model_name, params)
+            assert "temperature" in adapted
+            assert adapted["temperature"] == 0.7
+
 class TestIntegration:
     def test_mode_uses_glm_model(self):
         modes = get_available_modes()
@@ -183,3 +242,10 @@ class TestIntegration:
                 assert response is not None
             except Exception as e:
                 pytest.fail(f"Mode {mode['id']} failed: {str(e)}")
+    
+    def test_modes_with_different_models(self):
+        model_names = ["zai-org/GLM-4.7-Flash", "gpt-5.4", "gpt-5.4-mini"]
+        for model_name in model_names:
+            modes = get_available_modes(model_name)
+            assert len(modes) == 6
+            assert all(m["params"]["model"] == model_name for m in modes)
