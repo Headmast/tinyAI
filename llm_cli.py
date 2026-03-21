@@ -283,7 +283,32 @@ def execute_mode(client, mode, user_input, max_retries=3):
             answer_text, reasoning_text = stream_response(client, params.copy())
             
             # Создаём объект ответа для совместимости
-            # Делаем обычный запрос для получения usage статистики
+            # Для gpt-5-nano не делаем второй запрос (игнорирует max_completion_tokens)
+            model_name = mode['params']['model']
+            if model_name == "gpt-5-nano":
+                # Оцениваем токены на основе длины ответа
+                estimated_prompt_tokens = sum(len(m['content']) for m in messages) // 4
+                estimated_completion_tokens = (len(answer_text) + len(reasoning_text)) // 4
+                
+                class MockResponse:
+                    def __init__(self, content, usage, reasoning=""):
+                        self.choices = [type('obj', (object,), {
+                            'message': type('obj', (object,), {
+                                'content': content,
+                                'reasoning_content': reasoning
+                            })()
+                        })()]
+                        self.usage = usage
+                
+                mock_usage = type('obj', (object,), {
+                    'prompt_tokens': estimated_prompt_tokens,
+                    'completion_tokens': estimated_completion_tokens,
+                    'total_tokens': estimated_prompt_tokens + estimated_completion_tokens
+                })()
+                
+                return MockResponse(answer_text, mock_usage, reasoning_text)
+            
+            # Для других моделей делаем запрос для статистики
             params_for_usage = params.copy()
             params_for_usage['max_completion_tokens'] = 1  # Минимальный запрос для статистики
             if 'extra_body' in params_for_usage:
