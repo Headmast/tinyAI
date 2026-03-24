@@ -1,11 +1,38 @@
+"""
+News Agent CLI — AI-агент для автоматической генерации новостных постов.
+
+Команды:
+  generate <тема>          — создать пост через 5-шаговый pipeline
+  generate -t <тип> <тема> — с указанием типа (breaking/analysis/digest/social/press)
+  agent <тема>             — автономный ReAct-агент
+  batch <файл>             — пакетная генерация из файла тем
+  history [n]              — последние n постов (по умолчанию 10)
+  export <id> <формат>     — экспортировать пост (md/html/telegram/json/plain)
+  template list            — список типов постов
+  template show <тип>      — показать описание типа
+  models                   — список доступных моделей
+  model <name>             — переключить модель
+  quit / exit / q          — выход
+"""
+
 import os
 import json
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
 from openai import OpenAI
 from dotenv import load_dotenv
 
+from news_agent.storage import PostStorage
+from news_agent.pipeline import NewsPipeline
+from news_agent.agent import AgentLoop
+from news_agent.roles import POST_TYPE_GUIDES
+
 load_dotenv()
+
 
 def get_available_models():
     return {
@@ -914,169 +941,298 @@ def interactive_mode_selection(client, user_input, log_file, mode_id, model_name
         traceback.print_exc()
         return None
 
+def _cmd_generate(
+    topic: str,
+    post_type: Optional[str],
+    client,
+    model: str,
+    storage: PostStorage,
+) -> None:
+    """Генерирует пост через pipeline и сохраняет."""
+    pipeline = NewsPipeline(client=client, model=model, verbose=True)
+    try:
+        result = pipeline.run(topic=topic, post_type=post_type)
+    except Exception as e:
+        print(f"\n❌ Ошибка pipeline: {e}")
+        import traceback; traceback.print_exc()
+        return
+
+    result["model"] = model
+    post_id = storage.save(result)
+
+    print(f"\n✅ Пост сохранён  ID: {post_id}")
+    print(f"   Файл: posts/{post_id}/post.md")
+
+    seo = result.get("seo", {})
+    best_headline = (seo.get("headline_variants") or [{}])[0].get("text", "")
+    if best_headline:
+        print(f"   Заголовок: {best_headline}")
+
+    meta = seo.get("meta_description", "")
+    if meta:
+        print(f"   Meta: {meta[:80]}...")
+
+
+def _cmd_agent(topic: str, client, model: str, storage: PostStorage) -> None:
+    """Запускает автономный ReAct-агент."""
+    agent = AgentLoop(client=client, model=model, storage=storage, verbose=True)
+    try:
+        result = agent.run(task=topic)
+    except Exception as e:
+        print(f"\n❌ Ошибка агента: {e}")
+        import traceback; traceback.print_exc()
+        return
+
+    post_id = result.get("saved_post_id")
+    iterations = result.get("iterations", "?")
+    tokens = result.get("token_usage", {}).get("total_tokens", "?")
+
+    print(f"\n✅ Агент завершил работу")
+    print(f"   Итераций: {iterations}  |  Токенов ~: {tokens}")
+    if post_id:
+        print(f"   Сохранён пост ID: {post_id}  →  posts/{post_id}/post.md")
+    print(f"\n{result['final_post']}")
+
+
+def _cmd_batch(filepath: str, client, model: str, storage: PostStorage) -> None:
+    """Пакетная генерация из файла (одна тема = одна строка)."""
+    path = Path(filepath)
+    if not path.exists():
+        print(f"❌ Файл не найден: {filepath}")
+        return
+
+    lines = [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    print(f"📋 Найдено тем: {len(lines)}")
+
+    pipeline = NewsPipeline(client=client, model=model, verbose=False)
+    success, failed = 0, 0
+
+    for i, topic in enumerate(lines, 1):
+        print(f"\n[{i}/{len(lines)}] {topic[:70]}")
+        try:
+            result = pipeline.run(topic=topic)
+            result["model"] = model
+            post_id = storage.save(result)
+            print(f"  ✓ ID: {post_id}  слов: {len(result['post'].split())}")
+            success += 1
+        except Exception as e:
+            print(f"  ❌ Ошибка: {e}")
+            failed += 1
+
+    print(f"\n📊 Итого: {success} успешно, {failed} с ошибками")
+
+
+def _cmd_history(n: int, storage: PostStorage) -> None:
+    """Показывает последние n постов."""
+    posts = storage.list_posts(n=n)
+    if not posts:
+        print("История пуста.")
+        return
+    print(f"\n{'─' * 65}")
+    print(f"  ПОСЛЕДНИЕ ПОСТЫ ({len(posts)})")
+    print(f"{'─' * 65}")
+    for p in posts:
+        date = p["created_at"][:10]
+        tags = ", ".join(p.get("tags", [])[:3]) or "—"
+        print(f"  [{p['id']}]  {date}  [{p['post_type']:8}]  {p['title'][:45]}")
+        print(f"           слов: {p.get('word_count', '?')}  теги: {tags}")
+    print(f"{'─' * 65}")
+
+
+def _cmd_export(post_id: str, fmt: str, storage: PostStorage) -> None:
+    """Экспортирует пост в указанном формате."""
+    content = storage.export_post(post_id, fmt=fmt)
+    if content is None:
+        print(f"❌ Пост с ID '{post_id}' не найден")
+        return
+    out_file = Path("posts") / post_id / f"post.{fmt}"
+    out_file.write_text(content, encoding="utf-8")
+    print(f"✅ Экспортировано: {out_file}")
+    print(f"\n--- Предпросмотр ({fmt}) ---")
+    print(content[:600])
+    if len(content) > 600:
+        print(f"\n... ({len(content)} символов, полный файл: {out_file})")
+
+
+def _cmd_template(args: list) -> None:
+    """Управление шаблонами типов постов."""
+    sub = args[0] if args else "list"
+
+    if sub == "list":
+        print(f"\n{'─' * 50}")
+        print("  ТИПЫ ПОСТОВ")
+        print(f"{'─' * 50}")
+        for key, guide in POST_TYPE_GUIDES.items():
+            wmin, wmax = guide["word_count"]
+            print(f"  {key:12} — {guide['description']} ({wmin}-{wmax} слов, тон: {guide['tone']})")
+        print(f"{'─' * 50}")
+
+    elif sub == "show" and len(args) >= 2:
+        key = args[1]
+        if key not in POST_TYPE_GUIDES:
+            print(f"❌ Тип '{key}' не найден. Доступны: {', '.join(POST_TYPE_GUIDES)}")
+            return
+        guide = POST_TYPE_GUIDES[key]
+        print(f"\n[{key}] {guide['description']}")
+        print(f"  Объём:     {guide['word_count'][0]}-{guide['word_count'][1]} слов")
+        print(f"  Тон:       {guide['tone']}")
+        print(f"  Структура: {' → '.join(guide['structure'])}")
+    else:
+        print("Использование: template list | template show <тип>")
+
+
+def _print_help() -> None:
+    print("""
+╔═══════════════════════════════════════════════════════════════╗
+║              NEWS AGENT CLI  —  Команды                      ║
+╠═══════════════════════════════════════════════════════════════╣
+║  generate <тема>              Создать пост (pipeline)        ║
+║  generate -t <тип> <тема>     С указанием типа               ║
+║    типы: breaking, analysis, digest, social, press           ║
+║                                                               ║
+║  agent <тема>                 Автономный ReAct-агент         ║
+║                                                               ║
+║  batch <файл>                 Пакетная генерация из файла    ║
+║                                                               ║
+║  history [n]                  Последние n постов (def 10)    ║
+║  export <id> <формат>         Экспорт поста                  ║
+║    форматы: md, html, telegram, json, plain                  ║
+║                                                               ║
+║  template list                Список типов постов            ║
+║  template show <тип>          Описание типа                  ║
+║                                                               ║
+║  models                       Список моделей                 ║
+║  model <name>                 Переключить модель             ║
+║                                                               ║
+║  help / ?                     Эта справка                    ║
+║  quit / exit / q              Выход                          ║
+╚═══════════════════════════════════════════════════════════════╝""")
+
+
 def main():
-    # Проверка ключей API
     cloud_api_key = os.getenv("CLOUD_API_KEY")
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    
+
     if not cloud_api_key and not openai_api_key:
-        print("Error: Neither CLOUD_API_KEY nor OPENAI_API_KEY found")
-        print("Please create .env file with at least one API key")
+        print("❌ Ни CLOUD_API_KEY, ни OPENAI_API_KEY не найдены в .env")
         return
-    
-    # Создание клиентов для разных провайдеров
+
     clients = {}
-    
     if cloud_api_key:
-        cloud_url = "https://foundation-models.api.cloud.ru/v1"
-        clients["cloud_ru"] = OpenAI(api_key=cloud_api_key, base_url=cloud_url, timeout=60.0)
-    
+        clients["cloud_ru"] = OpenAI(
+            api_key=cloud_api_key,
+            base_url="https://foundation-models.api.cloud.ru/v1",
+            timeout=120.0,
+        )
     if openai_api_key:
-        clients["openai"] = OpenAI(api_key=openai_api_key, timeout=60.0)
-    
-    log_file = setup_logging()
-    
-    print("LLM CLI Utility (Optimized for cost efficiency)")
-    print("\nДоступные команды:")
-    print("  'quit' / 'exit' / 'q' - выход")
-    print("  'compare' - сравнение всех режимов")
-    print("  'reasoning' - сравнение способов рассуждения (День 3)")
-    print("  'temperature' - сравнение температур (0, 0.7, 1.2)")
-    print("  'modes' - показать список режимов")
-    print("  'mode N' - переключиться на режим N (1-6)")
-    print("  'models' - показать список моделей")
-    print("  'model <name>' - переключиться на модель")
-    print("\nТекущий режим: Стандартный (без ограничений)")
-    print("Текущая модель: GPT-5 Nano (OpenAI)")
-    print(f"Логи сохраняются в: {log_file}")
-    print("\n⚠️ Для сравнения температур используйте модели Cloud.ru (GLM-4.7-Flash/GLM-4.7)")
-    print("-" * 50)
-    
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-    total_cost = 0.0
-    current_mode_id = 1
-    current_model = "gpt-5-nano"
-    
+        clients["openai"] = OpenAI(api_key=openai_api_key, timeout=120.0)
+
+    storage = PostStorage(base_dir="posts")
+    current_model = "zai-org/GLM-4.7-Flash" if "cloud_ru" in clients else "gpt-5-nano"
+
+    print("╔══════════════════════════════════════╗")
+    print("║       NEWS AGENT  v1.0               ║")
+    print("║  AI-агент для генерации новостей     ║")
+    print("╚══════════════════════════════════════╝")
+    print(f"  Модель:     {get_available_models()[current_model]['name']}")
+    print(f"  Хранилище:  posts/")
+    print("  Введите 'help' для списка команд")
+    print()
+
+    session_posts = 0
+
     while True:
-        user_input = input("\nYou: ").strip()
-        
-        if user_input.lower() == 'models':
-            print("\nДоступные модели:")
-            models = get_available_models()
-            for model_id, model_info in models.items():
-                marker = "★" if model_id == current_model else " "
-                print(f"{marker} {model_id}")
-                print(f"   Название: {model_info['name']}")
-                print(f"   Описание: {model_info['description']}")
-                print(f"   Цена: ${model_info['prompt_price']}/1K prompt, ${model_info['completion_price']}/1K completion")
-            continue
-        
-        if user_input.lower() == 'modes':
-            print("\nДоступные режимы:")
-            for mode in get_available_modes(current_model):
-                marker = "★" if mode['id'] == current_mode_id else " "
-                print(f"{marker} {mode['id']}. {mode['name']}")
-                if 'system_prompt' in mode:
-                    print(f"   Промпт: {mode['system_prompt'][:70]}...")
-            continue
-        
-        if user_input.lower().startswith('model '):
-            model_name = user_input[6:].strip()
-            if model_name in get_available_models():
-                current_model = model_name
-                model_info = get_available_models()[model_name]
-                print(f"\n✓ Переключено на модель: {model_info['name']}")
-                print(f"  Цена: ${model_info['prompt_price']}/1K prompt, ${model_info['completion_price']}/1K completion")
-            else:
-                print(f"Ошибка: Модель '{model_name}' не найдена")
-                print("Используйте 'models' для просмотра доступных моделей")
-            continue
-        
-        if user_input.lower().startswith('mode '):
-            try:
-                mode_num = int(user_input.split()[1])
-                if 1 <= mode_num <= 5:
-                    current_mode_id = mode_num
-                    mode_name = get_available_modes(current_model)[mode_num - 1]['name']
-                    print(f"\n✓ Переключено на режим {mode_num}: {mode_name}")
-                else:
-                    print("Ошибка: Выберите режим от 1 до 5")
-            except (IndexError, ValueError):
-                print("Ошибка: Используйте формат 'mode N', где N - номер режима (1-5)")
-            continue
-        
-        if user_input.lower() == 'compare':
-            task_input = input("Введите запрос для сравнения: ").strip()
-            if task_input:
-                client = get_client_for_model(current_model, clients)
-                compare_formatting_modes(client, task_input, log_file, current_model)
-            continue
-        
-        if user_input.lower() == 'reasoning':
-            task_input = input("Введите задачу для сравнения способов рассуждения: ").strip()
-            if task_input:
-                client = get_client_for_model(current_model, clients)
-                compare_reasoning_approaches(client, task_input, log_file, current_model)
-            continue
-        
-        if user_input.lower() == 'temperature':
-            task_input = input("Введите запрос для сравнения температур: ").strip()
-            if task_input:
-                client = get_client_for_model(current_model, clients)
-                compare_temperatures(client, task_input, log_file, current_model)
-            continue
-        
-        if user_input.lower() in ['quit', 'exit', 'q']:
-            print("\n" + "=" * 50)
-            print(f"Session summary:")
-            print(f"  Total prompt tokens: {total_prompt_tokens}")
-            print(f"  Total completion tokens: {total_completion_tokens}")
-            print(f"  Total tokens: {total_prompt_tokens + total_completion_tokens}")
-            print(f"  Estimated cost: ${total_cost:.6f}")
-            print("Goodbye!")
-            break
-        
-        if not user_input:
-            continue
-        
-        # Выбор модели перед запросом
-        print("\nВыберите модель:")
-        models = get_available_models()
-        # Фильтруем модели по доступности провайдеров
-        available_models = {k: v for k, v in models.items() if v["provider"] in clients}
-        for model_key, model_info in available_models.items():
-            marker = "★" if model_key == current_model else " "
-            print(f"{marker} {model_info['id']}. {model_info['name']} - {model_info['description']}")
-        
-        model_choice = input("Модель (1, 2 или 3, Enter = текущая): ").strip()
-        
-        if model_choice:
-            selected_model = None
-            for model_key, model_info in models.items():
-                if str(model_info['id']) == model_choice:
-                    selected_model = model_key
-                    break
-            
-            if selected_model:
-                current_model = selected_model
-                print(f"✓ Выбрана модель: {models[current_model]['name']}")
-            else:
-                print(f"Используется текущая модель: {models[current_model]['name']}")
-        else:
-            print(f"Используется текущая модель: {models[current_model]['name']}")
-        
         try:
+            raw = input("news-agent> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nДо свидания!")
+            break
+
+        if not raw:
+            continue
+
+        parts = raw.split()
+        cmd = parts[0].lower()
+
+        if cmd in ("quit", "exit", "q"):
+            print(f"\n📊 Сессия: создано постов — {session_posts}")
+            print("До свидания!")
+            break
+
+        elif cmd in ("help", "?"):
+            _print_help()
+
+        elif cmd == "models":
+            models = get_available_models()
+            print(f"\n{'─' * 55}")
+            for mid, info in models.items():
+                marker = "★" if mid == current_model else " "
+                avail = "✓" if info["provider"] in clients else "✗"
+                print(f" {avail}{marker} {info['name']:20} {mid}")
+            print(f"{'─' * 55}")
+
+        elif cmd == "model" and len(parts) >= 2:
+            name = " ".join(parts[1:])
+            if name in get_available_models():
+                info = get_available_models()[name]
+                if info["provider"] not in clients:
+                    print(f"❌ Провайдер '{info['provider']}' недоступен (нет ключа API)")
+                else:
+                    current_model = name
+                    print(f"✓ Модель: {info['name']}")
+            else:
+                print(f"❌ Модель '{name}' не найдена. Используйте 'models'")
+
+        elif cmd == "generate":
+            post_type = None
+            topic_parts = parts[1:]
+            if len(topic_parts) >= 3 and topic_parts[0] == "-t":
+                post_type = topic_parts[1]
+                topic_parts = topic_parts[2:]
+            topic = " ".join(topic_parts)
+            if not topic:
+                topic = input("Тема поста: ").strip()
+            if not topic:
+                print("❌ Тема не может быть пустой")
+                continue
             client = get_client_for_model(current_model, clients)
-            usage_info = interactive_mode_selection(client, user_input, log_file, current_mode_id, current_model)
-            
-            if usage_info:
-                total_prompt_tokens += usage_info['prompt_tokens']
-                total_completion_tokens += usage_info['completion_tokens']
-                total_cost += usage_info['cost']
-            
-        except Exception as e:
-            print(f"\nError: {str(e)}")
+            _cmd_generate(topic, post_type, client, current_model, storage)
+            session_posts += 1
+
+        elif cmd == "agent":
+            topic = " ".join(parts[1:])
+            if not topic:
+                topic = input("Задача для агента: ").strip()
+            if not topic:
+                print("❌ Задача не может быть пустой")
+                continue
+            client = get_client_for_model(current_model, clients)
+            _cmd_agent(topic, client, current_model, storage)
+            session_posts += 1
+
+        elif cmd == "batch":
+            if len(parts) < 2:
+                print("Использование: batch <файл>")
+                continue
+            client = get_client_for_model(current_model, clients)
+            _cmd_batch(parts[1], client, current_model, storage)
+
+        elif cmd == "history":
+            n = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 10
+            _cmd_history(n, storage)
+
+        elif cmd == "export":
+            if len(parts) < 3:
+                print("Использование: export <id> <формат>")
+                continue
+            _cmd_export(parts[1], parts[2], storage)
+
+        elif cmd == "template":
+            _cmd_template(parts[1:])
+
+        else:
+            print(f"❓ Неизвестная команда: '{cmd}'. Введите 'help'")
+
 
 if __name__ == "__main__":
     main()
