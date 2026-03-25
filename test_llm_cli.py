@@ -22,6 +22,8 @@ from llm_cli import (
     _cmd_chat_list,
     _cmd_chat_delete,
     _print_session_info,
+    _build_token_comparison,
+    _format_token_comparison,
 )
 from news_agent.session_manager import ConversationSession, SessionStorage
 
@@ -352,3 +354,96 @@ class TestSessionManagerImport:
     def test_session_storage_imported(self):
         from llm_cli import SessionStorage
         assert SessionStorage is not None
+
+
+class TestTokenComparison:
+    """Тесты для _build_token_comparison и _format_token_comparison."""
+
+    def _api_usage(self, prompt=100, completion=50):
+        return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
+
+    # ── _build_token_comparison ───────────────────────────────────────
+
+    def test_no_api_usage_returns_has_api_false(self):
+        cmp = _build_token_comparison(100, 50, None, "tiktoken")
+        assert cmp is not None
+        assert cmp["has_api"] is False
+        assert cmp["method"] == "tiktoken"
+
+    def test_with_api_usage_has_api_true(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(100, 50), "tiktoken")
+        assert cmp["has_api"] is True
+
+    def test_exact_match_zero_diff(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(100, 50), "tiktoken")
+        assert cmp["diff_prompt"] == 0
+        assert cmp["diff_compl"] == 0
+        assert cmp["pct_prompt"] == pytest.approx(0.0)
+        assert cmp["pct_compl"] == pytest.approx(0.0)
+
+    def test_local_over_api(self):
+        cmp = _build_token_comparison(110, 55, self._api_usage(100, 50), "tiktoken")
+        assert cmp["diff_prompt"] == 10
+        assert cmp["diff_compl"] == 5
+        assert cmp["pct_prompt"] == pytest.approx(10.0)
+        assert cmp["pct_compl"] == pytest.approx(10.0)
+
+    def test_local_under_api(self):
+        cmp = _build_token_comparison(90, 45, self._api_usage(100, 50), "~chars÷4")
+        assert cmp["diff_prompt"] == -10
+        assert cmp["diff_compl"] == -5
+        assert cmp["pct_prompt"] == pytest.approx(-10.0)
+        assert cmp["pct_compl"] == pytest.approx(-10.0)
+
+    def test_api_total_stored(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(100, 50), "tiktoken")
+        assert cmp["api_total"] == 150
+
+    def test_method_label_stored(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(), "~chars÷4")
+        assert cmp["method"] == "~chars÷4"
+
+    def test_zero_api_completion_no_division_error(self):
+        cmp = _build_token_comparison(100, 0, self._api_usage(100, 0), "tiktoken")
+        assert cmp["pct_compl"] == pytest.approx(0.0)
+
+    # ── _format_token_comparison ──────────────────────────────────────
+
+    def test_format_none_returns_empty(self):
+        assert _format_token_comparison(None) == ""
+
+    def test_format_no_api_returns_empty(self):
+        cmp = {"has_api": False, "method": "tiktoken"}
+        assert _format_token_comparison(cmp) == ""
+
+    def test_format_returns_string(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(100, 50), "tiktoken")
+        result = _format_token_comparison(cmp)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_format_contains_api_values(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(100, 50), "tiktoken")
+        result = _format_token_comparison(cmp)
+        assert "100" in result
+        assert "50" in result
+
+    def test_format_contains_method_label(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(100, 50), "tiktoken")
+        result = _format_token_comparison(cmp)
+        assert "tiktoken" in result
+
+    def test_format_accurate_shows_checkmark(self):
+        cmp = _build_token_comparison(100, 50, self._api_usage(100, 50), "tiktoken")
+        result = _format_token_comparison(cmp)
+        assert "✅" in result
+
+    def test_format_inaccurate_shows_ruler(self):
+        cmp = _build_token_comparison(200, 100, self._api_usage(100, 50), "~chars÷4")
+        result = _format_token_comparison(cmp)
+        assert "📐" in result
+
+    def test_format_shows_percentage(self):
+        cmp = _build_token_comparison(110, 55, self._api_usage(100, 50), "tiktoken")
+        result = _format_token_comparison(cmp)
+        assert "%" in result

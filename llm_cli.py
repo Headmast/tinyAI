@@ -334,6 +334,73 @@ def count_words(text):
     return len(text.split())
 
 
+def _build_token_comparison(
+    local_prompt: int,
+    local_completion: int,
+    api_usage: Optional[dict],
+    counter_method: str,
+) -> Optional[dict]:
+    """
+    Строит словарь сравнения локального подсчёта токенов с реальными данными API.
+
+    Возвращает None если API usage недоступен.
+    Возвращает dict:
+        has_api      — True если API вернул usage
+        api_prompt   — реальные prompt-токены от API
+        api_compl    — реальные completion-токены от API
+        local_prompt — локальный расчёт (TokenCounter)
+        local_compl  — локальный расчёт (TokenCounter)
+        diff_prompt  — отклонение (local - api)
+        diff_compl   — отклонение (local - api)
+        pct_prompt   — % отклонения prompt
+        pct_compl    — % отклонения completion
+        method       — "tiktoken" или "~chars÷4"
+    """
+    if not api_usage:
+        return {"has_api": False, "method": counter_method}
+
+    api_p = api_usage["prompt_tokens"]
+    api_c = api_usage["completion_tokens"]
+    diff_p = local_prompt - api_p
+    diff_c = local_completion - api_c
+    pct_p = diff_p / api_p * 100 if api_p else 0.0
+    pct_c = diff_c / api_c * 100 if api_c else 0.0
+
+    return {
+        "has_api":      True,
+        "api_prompt":   api_p,
+        "api_compl":    api_c,
+        "api_total":    api_usage["total_tokens"],
+        "local_prompt": local_prompt,
+        "local_compl":  local_completion,
+        "diff_prompt":  diff_p,
+        "diff_compl":   diff_c,
+        "pct_prompt":   pct_p,
+        "pct_compl":    pct_c,
+        "method":       counter_method,
+    }
+
+
+def _format_token_comparison(cmp: Optional[dict]) -> str:
+    """Форматирует сравнение токенов в одну-две строки для вывода в чат."""
+    if not cmp or not cmp.get("has_api"):
+        return ""
+
+    def _sign(n: float) -> str:
+        return f"+{n:.1f}" if n >= 0 else f"{n:.1f}"
+
+    p_diff = _sign(cmp["pct_prompt"])
+    c_diff = _sign(cmp["pct_compl"])
+
+    accuracy_icon = "✅" if abs(cmp["pct_prompt"]) < 5 and abs(cmp["pct_compl"]) < 5 else "📐"
+
+    return (
+        f"   {accuracy_icon} API:   prompt={cmp['api_prompt']:,}  completion={cmp['api_compl']:,}  total={cmp['api_total']:,}\n"
+        f"      local [{cmp['method']}]: prompt={cmp['local_prompt']:,} ({p_diff}%)  "
+        f"completion={cmp['local_compl']:,} ({c_diff}%)"
+    )
+
+
 def _chat_send(
     client,
     session: ConversationSession,
@@ -368,14 +435,23 @@ def _chat_send(
     if session.model == "gpt-5-nano":
         del params["temperature"]
 
-    response_text, reasoning = stream_response(client, params, show_thinking=True)
+    response_text, reasoning, api_usage = stream_response(client, params, show_thinking=True)
 
     session.add_assistant_message(response_text)
 
-    completion_tokens = counter.count_response(response_text + reasoning)
-    session.update_token_usage(prompt_tokens, completion_tokens)
+    local_completion = counter.count_response(response_text + reasoning)
+    session.update_token_usage(prompt_tokens, local_completion)
 
-    return response_text, prompt_tokens, completion_tokens
+    token_comparison = _build_token_comparison(
+        local_prompt=prompt_tokens,
+        local_completion=local_completion,
+        api_usage=api_usage,
+        counter_method=counter.method_label,
+    )
+
+    final_prompt = api_usage["prompt_tokens"] if api_usage else prompt_tokens
+    final_completion = api_usage["completion_tokens"] if api_usage else local_completion
+    return response_text, final_prompt, final_completion, token_comparison
 
 
 def _print_session_info(session: ConversationSession) -> None:
@@ -459,12 +535,11 @@ def _run_chat_loop(
 
         try:
             with RequestTimer() as t:
-                _, pt, ct = _chat_send(client, session, user_input)
+                _, pt, ct, token_cmp = _chat_send(client, session, user_input)
             session_storage.save(session)
 
             msgs = session.get_messages_for_api()
             if len(msgs) >= 2:
-                user_msg = msgs[-2] if msgs[-2]["role"] == "user" else msgs[-1]
                 asst_msg = msgs[-1] if msgs[-1]["role"] == "assistant" else None
                 dialog_tracker.add_turn("user", user_input, msgs[:-1] if asst_msg else msgs)
                 if asst_msg:
@@ -472,7 +547,6 @@ def _run_chat_loop(
 
             cost = calculate_cost(pt, ct, session.model)
             tokens_exact = counter.is_exact
-            exact_mark = "" if tokens_exact else "~"
             if tracker is not None:
                 tracker.record(
                     command="chat",
@@ -488,10 +562,14 @@ def _run_chat_loop(
             ctx_info = session.get_context_info()
             print(f"\n{session.format_context_bar()}")
             print(
-                f"   prompt {exact_mark}{pt:,} | "
-                f"completion {exact_mark}{ct:,} | "
-                f"${cost:.6f} | {t.elapsed_ms:.0f}мс  [{method_label}]\n"
+                f"   prompt={pt:,} | completion={ct:,} | "
+                f"${cost:.6f} | {t.elapsed_ms:.0f}мс"
             )
+
+            cmp_line = _format_token_comparison(token_cmp)
+            if cmp_line:
+                print(cmp_line)
+            print()
 
             if ctx_info["warning"]:
                 print(
@@ -605,7 +683,7 @@ def _cmd_api_simple(clients: dict, current_model: str, tracker: UsageTracker) ->
         pt_est = len(raw) // 4
         try:
             with RequestTimer() as t:
-                response_text, _ = stream_response(client, params)
+                response_text, _, _api_usage = stream_response(client, params)
             ct_est = len(response_text) // 4
             cost = calculate_cost(pt_est, ct_est, model)
             tracker.record(
@@ -741,7 +819,7 @@ def _cmd_api_advanced(clients: dict, current_model: str, tracker: UsageTracker) 
         pt_est = sum(len(m["content"]) for m in messages) // 4
         try:
             with RequestTimer() as t:
-                response_text, _ = stream_response(client, api_params)
+                response_text, _, _api_usage = stream_response(client, api_params)
             ct_est = len(response_text) // 4
             cost = calculate_cost(pt_est, ct_est, model)
             tracker.record(
@@ -776,39 +854,52 @@ def _cmd_stats(tracker: UsageTracker, args: list) -> None:
 
 
 def stream_response(client, params, show_thinking=True):
-    """Потоковый вывод ответа с поэтапной печатью и размышлениями"""
+    """
+    Потоковый вывод ответа с поэтапной печатью и размышлениями.
+
+    Returns:
+        (full_response, reasoning_text, api_usage)
+        api_usage — dict с prompt/completion/total_tokens от API,
+                    или None если модель не вернула usage.
+    """
     import sys
-    
-    # Включаем streaming
+
     params['stream'] = True
-    
-    # Включаем thinking для GLM-4.7
+
     model_name = params.get('model', '')
     if 'GLM' in model_name.upper():
         if 'extra_body' not in params:
             params['extra_body'] = {}
         params['extra_body']['thinking'] = {
             'type': 'enabled',
-            'clear_thinking': False  # Сохраняем размышления
+            'clear_thinking': False
         }
-    
+
+    params['stream_options'] = {"include_usage": True}
+
     full_response = ""
     reasoning_text = ""
     in_reasoning = False
-    
+    api_usage = None
+
     print("\n", flush=True)
-    
+
     try:
         stream = client.chat.completions.create(**params)
-        
+
         for chunk in stream:
-            # Проверяем наличие choices
             if not chunk.choices or len(chunk.choices) == 0:
+                usage = getattr(chunk, 'usage', None)
+                if usage is not None:
+                    api_usage = {
+                        "prompt_tokens":     getattr(usage, 'prompt_tokens', 0),
+                        "completion_tokens": getattr(usage, 'completion_tokens', 0),
+                        "total_tokens":      getattr(usage, 'total_tokens', 0),
+                    }
                 continue
-            
+
             delta = chunk.choices[0].delta
-            
-            # Вывод размышлений (reasoning_content)
+
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 if not in_reasoning and show_thinking:
                     print("\n💭 [Размышление]", flush=True)
@@ -816,8 +907,7 @@ def stream_response(client, params, show_thinking=True):
                 reasoning_text += delta.reasoning_content
                 if show_thinking:
                     print(delta.reasoning_content, end="", flush=True)
-            
-            # Вывод основного ответа
+
             if hasattr(delta, 'content') and delta.content:
                 if in_reasoning and show_thinking:
                     print("\n\n📝 [Ответ]", flush=True)
@@ -825,22 +915,28 @@ def stream_response(client, params, show_thinking=True):
                 content = delta.content
                 full_response += content
                 print(content, end="", flush=True)
-        
+
         print("\n", flush=True)
-        
-        # Возвращаем полный ответ для логирования
-        return full_response, reasoning_text
-        
+        return full_response, reasoning_text, api_usage
+
     except Exception as e:
         print(f"\n❌ Ошибка при streaming: {str(e)}", flush=True)
         import traceback
         traceback.print_exc()
-        # Fallback на обычный режим
         params['stream'] = False
+        params.pop('stream_options', None)
         if 'extra_body' in params:
             del params['extra_body']
         response = client.chat.completions.create(**params)
-        return response.choices[0].message.content, ""
+        usage = getattr(response, 'usage', None)
+        fallback_usage = None
+        if usage:
+            fallback_usage = {
+                "prompt_tokens":     getattr(usage, 'prompt_tokens', 0),
+                "completion_tokens": getattr(usage, 'completion_tokens', 0),
+                "total_tokens":      getattr(usage, 'total_tokens', 0),
+            }
+        return response.choices[0].message.content, "", fallback_usage
 
 def execute_mode(client, mode, user_input, max_retries=3):
     # Режим 6: метапромптинг с двумя этапами
@@ -863,7 +959,7 @@ def execute_mode(client, mode, user_input, max_retries=3):
             print("🤔 Размышляю...", flush=True)
             
             # Используем streaming для постепенного вывода
-            answer_text, reasoning_text = stream_response(client, params.copy())
+            answer_text, reasoning_text, _api_usage = stream_response(client, params.copy())
             
             # Создаём объект ответа для совместимости
             # Для gpt-5-nano не делаем второй запрос (игнорирует max_completion_tokens)
@@ -1111,7 +1207,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         print("\n🤔 Размышляю...", flush=True)
         
         # Используем streaming для показа размышлений
-        answer1, reasoning1 = stream_response(client, params.copy())
+        answer1, reasoning1, _u1 = stream_response(client, params.copy())
         
         # Оценка токенов
         estimated_tokens = (len(answer1) + len(reasoning1)) // 4
@@ -1146,7 +1242,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         print("\n🤔 Размышляю пошагово...", flush=True)
         
         # Используем streaming для показа размышлений
-        answer2, reasoning2 = stream_response(client, params.copy())
+        answer2, reasoning2, _u2 = stream_response(client, params.copy())
         
         # Оценка токенов
         estimated_tokens = (len(answer2) + len(reasoning2)) // 4
@@ -1181,7 +1277,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         print("\n🤔 Создаю промпт...", flush=True)
         
         # Streaming для создания промпта
-        generated_prompt, reasoning_meta = stream_response(client, params.copy())
+        generated_prompt, reasoning_meta, _um = stream_response(client, params.copy())
         
         print(f"\n\nСгенерированный промпт: {generated_prompt}")
         print(f"\n{'·' * 70}")
@@ -1191,7 +1287,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
         print("\n🤔 Решаю по промпту...", flush=True)
         
         # Streaming для решения по промпту
-        answer3, reasoning3 = stream_response(client, params.copy())
+        answer3, reasoning3, _u3 = stream_response(client, params.copy())
         
         # Оценка токенов
         estimated_tokens = (len(generated_prompt) + len(reasoning_meta) + len(answer3) + len(reasoning3)) // 4
@@ -1240,7 +1336,7 @@ def compare_reasoning_approaches(client, user_input, log_file, model_name="zai-o
             print(f"🤔 {expert_name} размышляет...", flush=True)
             
             # Используем streaming для показа размышлений эксперта
-            expert_answer, expert_reasoning = stream_response(client, params.copy())
+            expert_answer, expert_reasoning, _ue = stream_response(client, params.copy())
             
             # Оценка токенов
             estimated_tokens = (len(expert_answer) + len(expert_reasoning)) // 4
@@ -1343,7 +1439,7 @@ def compare_temperatures(client, user_input, log_file, model_name="zai-org/GLM-4
             params = get_model_params(model_name, base_params)
             
             print("\n🤔 Генерирую ответ...", flush=True)
-            answer, reasoning = stream_response(client, params.copy())
+            answer, reasoning, _ut = stream_response(client, params.copy())
             
             # Оценка токенов
             estimated_tokens = (len(answer) + len(reasoning)) // 4
