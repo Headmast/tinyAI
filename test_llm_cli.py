@@ -24,6 +24,7 @@ from llm_cli import (
     _print_session_info,
     _build_token_comparison,
     _format_token_comparison,
+    stream_response,
 )
 from news_agent.session_manager import ConversationSession, SessionStorage
 
@@ -447,3 +448,148 @@ class TestTokenComparison:
         cmp = _build_token_comparison(110, 55, self._api_usage(100, 50), "tiktoken")
         result = _format_token_comparison(cmp)
         assert "%" in result
+
+
+class TestStreamInterrupt:
+    """
+    Тесты для прерывания рассуждений через SIGINT-обработчик в stream_response.
+    """
+
+    def _make_chunks(self, reasoning_parts=None, content_parts=None):
+        """Возвращает список mock-чанков с reasoning и/или content."""
+        chunks = []
+
+        for text in (reasoning_parts or []):
+            c = MagicMock()
+            c.choices = [MagicMock()]
+            c.choices[0].delta = MagicMock()
+            c.choices[0].delta.reasoning_content = text
+            c.choices[0].delta.content = None
+            chunks.append(c)
+
+        for text in (content_parts or []):
+            c = MagicMock()
+            c.choices = [MagicMock()]
+            c.choices[0].delta = MagicMock()
+            c.choices[0].delta.reasoning_content = None
+            c.choices[0].delta.content = text
+            chunks.append(c)
+
+        return chunks
+
+    def _client(self, chunks):
+        client = MagicMock()
+        client.chat.completions.create.return_value = iter(chunks)
+        return client
+
+    def test_normal_stream_returns_text(self, capsys):
+        chunks = self._make_chunks(content_parts=["Hello ", "world"])
+        client = self._client(chunks)
+        text, reasoning, usage = stream_response(client, {"model": "gpt-5-nano"}, show_thinking=False)
+        assert text == "Hello world"
+        assert reasoning == ""
+        assert usage is None
+
+    def test_reasoning_content_accumulated(self, capsys):
+        chunks = self._make_chunks(
+            reasoning_parts=["step 1 ", "step 2"],
+            content_parts=["answer"]
+        )
+        client = self._client(chunks)
+        text, reasoning, usage = stream_response(client, {"model": "gpt-5-nano"}, show_thinking=False)
+        assert "step 1" in reasoning
+        assert "step 2" in reasoning
+        assert text == "answer"
+
+    def test_skip_reasoning_flag_suppresses_display(self, capsys):
+        """Симулируем первый Ctrl+C: флаг skip_reasoning=True до старта."""
+        chunks = self._make_chunks(
+            reasoning_parts=["long thought "] * 5,
+            content_parts=["final answer"]
+        )
+        client = self._client(chunks)
+
+        import signal
+        original = signal.getsignal(signal.SIGINT)
+
+        captured_handler = [None]
+
+        def intercept_install(sig, handler):
+            captured_handler[0] = handler
+            return original
+
+        with patch('signal.signal', side_effect=intercept_install):
+            with patch('signal.getsignal', return_value=original):
+                text, reasoning, usage = stream_response(
+                    client, {"model": "gpt-5-nano"}, show_thinking=True
+                )
+
+        assert text == "final answer"
+        assert "long thought" in reasoning
+
+    def test_sigint_handler_restored_after_stream(self):
+        """SIGINT-обработчик должен быть восстановлен через finally."""
+        import signal
+        sentinel = lambda s, f: None
+        original_handler = signal.getsignal(signal.SIGINT)
+
+        chunks = self._make_chunks(content_parts=["ok"])
+        client = self._client(chunks)
+        stream_response(client, {"model": "gpt-5-nano"}, show_thinking=False)
+
+        current = signal.getsignal(signal.SIGINT)
+        assert current == original_handler
+
+    def test_sigint_handler_restored_on_exception(self):
+        """SIGINT восстанавливается даже при исключении в fallback-ветке."""
+        import signal
+        original_handler = signal.getsignal(signal.SIGINT)
+
+        client = MagicMock()
+        client.chat.completions.create.side_effect = Exception("network error")
+
+        fallback = MagicMock()
+        fallback.choices[0].message.content = "fallback text"
+        fallback.usage = None
+
+        def side_effect(**kwargs):
+            if kwargs.get('stream'):
+                raise Exception("network error")
+            return fallback
+
+        client.chat.completions.create.side_effect = side_effect
+
+        try:
+            stream_response(client, {"model": "gpt-5-nano"}, show_thinking=False)
+        except Exception:
+            pass
+
+        current = signal.getsignal(signal.SIGINT)
+        assert current == original_handler
+
+    def test_api_usage_captured_from_final_chunk(self, capsys):
+        """usage захватывается из финального чанка с пустым choices."""
+        usage_chunk = MagicMock()
+        usage_chunk.choices = []
+        usage_chunk.usage = MagicMock()
+        usage_chunk.usage.prompt_tokens = 42
+        usage_chunk.usage.completion_tokens = 17
+        usage_chunk.usage.total_tokens = 59
+
+        content_chunk = MagicMock()
+        content_chunk.choices = [MagicMock()]
+        content_chunk.choices[0].delta = MagicMock()
+        content_chunk.choices[0].delta.content = "answer"
+        content_chunk.choices[0].delta.reasoning_content = None
+
+        client = MagicMock()
+        client.chat.completions.create.return_value = iter([content_chunk, usage_chunk])
+
+        text, reasoning, usage = stream_response(
+            client, {"model": "gpt-5-nano"}, show_thinking=False
+        )
+        assert text == "answer"
+        assert usage is not None
+        assert usage["prompt_tokens"] == 42
+        assert usage["completion_tokens"] == 17
+        assert usage["total_tokens"] == 59

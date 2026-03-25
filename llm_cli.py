@@ -857,12 +857,16 @@ def stream_response(client, params, show_thinking=True):
     """
     Потоковый вывод ответа с поэтапной печатью и размышлениями.
 
+    Поддерживает прерывание рассуждений:
+        Ctrl+C (1-й раз)  — пропустить оставшееся рассуждение, дождаться ответа
+        Ctrl+C (2-й раз)  — прервать ответ полностью и вернуть накопленное
+
     Returns:
         (full_response, reasoning_text, api_usage)
         api_usage — dict с prompt/completion/total_tokens от API,
                     или None если модель не вернула usage.
     """
-    import sys
+    import signal
 
     params['stream'] = True
 
@@ -882,12 +886,27 @@ def stream_response(client, params, show_thinking=True):
     in_reasoning = False
     api_usage = None
 
+    _flags = [False, False]  # [skip_reasoning, abort]
+    _original_sigint = signal.getsignal(signal.SIGINT)
+
+    def _sigint_handler(sig, frame):
+        if not _flags[0]:
+            _flags[0] = True   # первый Ctrl+C: пропустить рассуждение
+        else:
+            _flags[1] = True   # второй Ctrl+C: прервать полностью
+        signal.signal(signal.SIGINT, _sigint_handler)
+
     print("\n", flush=True)
 
     try:
+        signal.signal(signal.SIGINT, _sigint_handler)
         stream = client.chat.completions.create(**params)
 
         for chunk in stream:
+            if _flags[1]:
+                print("\n\n⛔ Прервано\n", flush=True)
+                break
+
             if not chunk.choices or len(chunk.choices) == 0:
                 usage = getattr(chunk, 'usage', None)
                 if usage is not None:
@@ -901,17 +920,28 @@ def stream_response(client, params, show_thinking=True):
             delta = chunk.choices[0].delta
 
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                if not in_reasoning and show_thinking:
-                    print("\n💭 [Размышление]", flush=True)
-                    in_reasoning = True
                 reasoning_text += delta.reasoning_content
+
+                if _flags[0]:
+                    if in_reasoning:
+                        in_reasoning = False
+                        print("\n\n⏭ [Рассуждение пропущено → жду ответа...]", flush=True)
+                    continue
+
+                if not in_reasoning and show_thinking:
+                    print("\n💭 [Размышление]  (Ctrl+C — пропустить)", flush=True)
+                    in_reasoning = True
                 if show_thinking:
                     print(delta.reasoning_content, end="", flush=True)
 
             if hasattr(delta, 'content') and delta.content:
-                if in_reasoning and show_thinking:
-                    print("\n\n📝 [Ответ]", flush=True)
+                if in_reasoning:
+                    if show_thinking:
+                        print("\n\n📝 [Ответ]", flush=True)
                     in_reasoning = False
+                elif _flags[0] and not full_response:
+                    print("\n📝 [Ответ]", flush=True)
+
                 content = delta.content
                 full_response += content
                 print(content, end="", flush=True)
@@ -937,6 +967,9 @@ def stream_response(client, params, show_thinking=True):
                 "total_tokens":      getattr(usage, 'total_tokens', 0),
             }
         return response.choices[0].message.content, "", fallback_usage
+
+    finally:
+        signal.signal(signal.SIGINT, _original_sigint)
 
 def execute_mode(client, mode, user_input, max_retries=3):
     # Режим 6: метапромптинг с двумя этапами
