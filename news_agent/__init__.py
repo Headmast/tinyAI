@@ -12,6 +12,11 @@ from news_agent.storage import PostStorage
 from news_agent.pipeline import NewsPipeline
 from news_agent.agent import AgentLoop
 from news_agent.session_manager import ConversationSession, SessionStorage
+from news_agent.usage_tracker import UsageTracker, RequestTimer, RequestRecord
 
-__all__ = ["PostStorage", "NewsPipeline", "AgentLoop", "ConversationSession", "SessionStorage"]
-__version__ = "2.0.0"
+__all__ = [
+    "PostStorage", "NewsPipeline", "AgentLoop",
+    "ConversationSession", "SessionStorage",
+    "UsageTracker", "RequestTimer", "RequestRecord",
+]
+__version__ = "3.0.0"

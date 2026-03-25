@@ -24,6 +24,14 @@ News Agent CLI — AI-агент для генерации новостных п
   info                     — показать использование контекстного окна
   close / q                — закрыть сессию и вернуться в главное меню
 
+Ручные запросы к API:
+  api                      — простой режим (только выбор модели)
+  api advanced             — расширенный режим (настройка всех параметров под модель)
+
+Статистика:
+  stats                    — накопленная статистика (запросы, токены, стоимость)
+  stats reset              — сбросить статистику (подтверждение обязательно)
+
 Модели:
   models                   — список доступных моделей
   model <name>             — переключить модель
@@ -46,6 +54,7 @@ from news_agent.pipeline import NewsPipeline
 from news_agent.agent import AgentLoop
 from news_agent.roles import POST_TYPE_GUIDES
 from news_agent.session_manager import ConversationSession, SessionStorage, MODEL_CONTEXT_SIZES
+from news_agent.usage_tracker import UsageTracker, RequestTimer
 
 load_dotenv()
 
@@ -96,6 +105,94 @@ def get_available_models():
             "id": 5
         }
     }
+
+MODEL_PARAMS_SCHEMA = {
+    "zai-org/GLM-4.7-Flash": {
+        "temperature":   {"type": float, "min": 0.0, "max": 1.0, "default": 0.7,  "desc": "Случайность (0=детерм., 1=макс.)"},
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 128000, "default": 8000, "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 1.0,  "desc": "Nucleus sampling (0–1)"},
+        "thinking":      {"type": bool,  "default": True,  "desc": "Включить цепочку размышлений (GLM)"},
+    },
+    "zai-org/GLM-4.7": {
+        "temperature":   {"type": float, "min": 0.0, "max": 1.0, "default": 0.7,  "desc": "Случайность"},
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 128000, "default": 8000, "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 1.0,  "desc": "Nucleus sampling"},
+        "thinking":      {"type": bool,  "default": True,  "desc": "Включить цепочку размышлений (GLM)"},
+    },
+    "gpt-5-nano": {
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 128000, "default": 8000,  "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 1.0,  "desc": "Nucleus sampling"},
+        "presence_penalty":  {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за повторение тем (+поощряет новые)"},
+        "frequency_penalty": {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за частые токены (+уменьшает повторы)"},
+    },
+    "gpt-5.4": {
+        "temperature":   {"type": float, "min": 0.0, "max": 2.0, "default": 0.7,  "desc": "Случайность (0=детерм., 2=макс.)"},
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 128000, "default": 8000, "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 1.0,  "desc": "Nucleus sampling"},
+        "presence_penalty":  {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за повторение тем"},
+        "frequency_penalty": {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за частые токены"},
+    },
+    "gpt-5.4-mini": {
+        "temperature":   {"type": float, "min": 0.0, "max": 2.0, "default": 0.7,  "desc": "Случайность"},
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 128000, "default": 8000, "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 1.0,  "desc": "Nucleus sampling"},
+        "presence_penalty":  {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за повторение тем"},
+        "frequency_penalty": {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за частые токены"},
+    },
+}
+
+
+def _get_default_params(model_name: str) -> dict:
+    """Возвращает словарь параметров со значениями по умолчанию для модели."""
+    schema = MODEL_PARAMS_SCHEMA.get(model_name, MODEL_PARAMS_SCHEMA["zai-org/GLM-4.7-Flash"])
+    return {k: v["default"] for k, v in schema.items()}
+
+
+def _set_param(params: dict, model_name: str, key: str, raw_value: str) -> str:
+    """
+    Устанавливает параметр с валидацией. Возвращает строку-результат.
+    """
+    schema = MODEL_PARAMS_SCHEMA.get(model_name, {})
+    if key not in schema:
+        return f"❌ Параметр '{key}' не поддерживается моделью {model_name}"
+    spec = schema[key]
+    try:
+        if spec["type"] is bool:
+            val = raw_value.lower() in ("1", "true", "yes", "да", "on")
+        elif spec["type"] is int:
+            val = int(raw_value)
+        else:
+            val = float(raw_value)
+    except ValueError:
+        return f"❌ Значение '{raw_value}' не является {spec['type'].__name__}"
+
+    if spec["type"] is not bool:
+        lo, hi = spec.get("min"), spec.get("max")
+        if lo is not None and val < lo:
+            return f"❌ Минимум {lo}"
+        if hi is not None and val > hi:
+            return f"❌ Максимум {hi}"
+    params[key] = val
+    return f"✓ {key} = {val}"
+
+
+def _print_params(params: dict, model_name: str) -> None:
+    """Выводит текущие параметры с описаниями."""
+    schema = MODEL_PARAMS_SCHEMA.get(model_name, {})
+    print(f"\n  Параметры для {model_name}:")
+    print(f"  {'─' * 55}")
+    for k, v in params.items():
+        desc = schema.get(k, {}).get("desc", "")
+        spec = schema.get(k, {})
+        if spec.get("type") is not bool:
+            lo = spec.get("min", "")
+            hi = spec.get("max", "")
+            rng = f"[{lo}–{hi}]" if lo != "" else ""
+        else:
+            rng = "[true/false]"
+        print(f"    {k:24} = {str(v):>8}  {rng:16}  {desc}")
+    print(f"  {'─' * 55}\n")
+
 
 def get_client_for_model(model_name, clients):
     """Возвращает соответствующий client в зависимости от провайдера модели"""
@@ -295,6 +392,7 @@ def _run_chat_loop(
     client,
     session: ConversationSession,
     session_storage: SessionStorage,
+    tracker: Optional[UsageTracker] = None,
 ) -> None:
     """
     Интерактивный цикл диалога с сохранением истории.
@@ -339,12 +437,26 @@ def _run_chat_loop(
             continue
 
         try:
-            _, pt, ct = _chat_send(client, session, user_input)
+            with RequestTimer() as t:
+                _, pt, ct = _chat_send(client, session, user_input)
             session_storage.save(session)
+
+            cost = calculate_cost(pt, ct, session.model)
+            if tracker is not None:
+                tracker.record(
+                    command="chat",
+                    model=session.model,
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
+                    cost_usd=cost,
+                    response_time_ms=t.elapsed_ms,
+                    session_id=session.session_id,
+                    tokens_estimated=True,
+                )
 
             ctx_info = session.get_context_info()
             print(f"\n{session.format_context_bar()}")
-            print(f"   Токены ответа: prompt ~{pt:,} | completion ~{ct:,}\n")
+            print(f"   prompt ~{pt:,} | completion ~{ct:,} | ${cost:.6f} | {t.elapsed_ms:.0f}мс\n")
 
             if ctx_info["warning"]:
                 print(
@@ -352,6 +464,11 @@ def _run_chat_loop(
                     f"— рассмотрите начало новой сессии (chat new)\n"
                 )
         except Exception as e:
+            if tracker is not None:
+                tracker.record(
+                    command="chat", model=session.model,
+                    success=False, error=str(e), session_id=session.session_id,
+                )
             print(f"\n❌ Ошибка: {e}\n")
             session_storage.save(session)
 
@@ -383,6 +500,244 @@ def _cmd_chat_delete(session_id: str, session_storage: SessionStorage) -> None:
         print(f"✅ Сессия {session_id} удалена.")
     else:
         print(f"❌ Сессия '{session_id}' не найдена.")
+
+
+def _cmd_api_simple(clients: dict, current_model: str, tracker: UsageTracker) -> None:
+    """
+    Простой режим ручных API-запросов.
+
+    Пользователь выбирает только модель и отправляет произвольные запросы.
+    Вся статистика пишется в UsageTracker.
+
+    Команды внутри:
+        model <name>  — сменить модель
+        models        — список моделей
+        back / q      — выйти из режима
+    """
+    model = current_model
+    all_models = get_available_models()
+
+    print(f"\n{'═' * 58}")
+    print(f"  API — Простой режим")
+    print(f"  Модель: {all_models[model]['name']}  ({model})")
+    print(f"{'─' * 58}")
+    print("  model <name>  — сменить модель  |  models — список  |  back — выход")
+    print(f"{'═' * 58}\n")
+
+    while True:
+        try:
+            raw = input("api> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not raw:
+            continue
+
+        cmd = raw.lower()
+        if cmd in ("back", "exit", "q", "quit"):
+            break
+
+        if cmd == "models":
+            for mid, info in all_models.items():
+                marker = "★" if mid == model else " "
+                avail = "✓" if info["provider"] in clients else "✗"
+                print(f"  {avail}{marker} {info['name']:20} {mid}")
+            continue
+
+        if cmd.startswith("model "):
+            name = raw[6:].strip()
+            if name in all_models:
+                info = all_models[name]
+                if info["provider"] not in clients:
+                    print(f"❌ Провайдер '{info['provider']}' недоступен")
+                else:
+                    model = name
+                    print(f"✓ Модель: {info['name']}")
+            else:
+                print(f"❌ Модель '{name}' не найдена")
+            continue
+
+        client = get_client_for_model(model, clients)
+        params = {
+            "model": model,
+            "messages": [{"role": "user", "content": raw}],
+            "max_completion_tokens": 8000,
+        }
+        if model != "gpt-5-nano":
+            params["temperature"] = 0.7
+
+        pt_est = len(raw) // 4
+        try:
+            with RequestTimer() as t:
+                response_text, _ = stream_response(client, params)
+            ct_est = len(response_text) // 4
+            cost = calculate_cost(pt_est, ct_est, model)
+            tracker.record(
+                command="api_simple",
+                model=model,
+                prompt_tokens=pt_est,
+                completion_tokens=ct_est,
+                cost_usd=cost,
+                response_time_ms=t.elapsed_ms,
+                tokens_estimated=True,
+            )
+            print(f"  prompt ~{pt_est} | completion ~{ct_est} | ${cost:.6f} | {t.elapsed_ms:.0f}мс\n")
+        except Exception as e:
+            tracker.record(command="api_simple", model=model, success=False, error=str(e))
+            print(f"\n❌ Ошибка: {e}\n")
+
+
+def _cmd_api_advanced(clients: dict, current_model: str, tracker: UsageTracker) -> None:
+    """
+    Расширенный режим ручных API-запросов.
+
+    Позволяет вручную настроить все параметры модели перед отправкой запроса.
+    Набор параметров зависит от выбранной модели (MODEL_PARAMS_SCHEMA).
+
+    Команды внутри:
+        params              — показать текущие параметры
+        set <param> <val>   — установить параметр
+        reset               — сбросить параметры к значениям по умолчанию
+        system <текст>      — задать системный промпт
+        system clear        — очистить системный промпт
+        model <name>        — сменить модель (параметры сбрасываются)
+        models              — список моделей
+        back / q            — выйти из режима
+    """
+    model = current_model
+    all_models = get_available_models()
+    params = _get_default_params(model)
+    system_prompt: str = ""
+
+    print(f"\n{'═' * 62}")
+    print(f"  API — Расширенный режим")
+    print(f"  Модель: {all_models[model]['name']}  ({model})")
+    print(f"{'─' * 62}")
+    print("  params | set <param> <val> | reset | system <текст> | model <name>")
+    print(f"{'═' * 62}\n")
+    _print_params(params, model)
+
+    while True:
+        try:
+            raw = input("api-adv> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not raw:
+            continue
+
+        cmd_lower = raw.lower()
+
+        if cmd_lower in ("back", "exit", "q", "quit"):
+            break
+
+        if cmd_lower == "params":
+            _print_params(params, model)
+            if system_prompt:
+                print(f"  system: {system_prompt[:80]}\n")
+            continue
+
+        if cmd_lower == "reset":
+            params = _get_default_params(model)
+            system_prompt = ""
+            print("✓ Параметры сброшены к умолчаниям.")
+            _print_params(params, model)
+            continue
+
+        if cmd_lower == "models":
+            for mid, info in all_models.items():
+                marker = "★" if mid == model else " "
+                avail = "✓" if info["provider"] in clients else "✗"
+                print(f"  {avail}{marker} {info['name']:20} {mid}")
+            continue
+
+        if cmd_lower.startswith("model "):
+            name = raw[6:].strip()
+            if name in all_models:
+                info = all_models[name]
+                if info["provider"] not in clients:
+                    print(f"❌ Провайдер '{info['provider']}' недоступен")
+                else:
+                    model = name
+                    params = _get_default_params(model)
+                    system_prompt = ""
+                    print(f"✓ Модель: {info['name']}  (параметры сброшены)")
+                    _print_params(params, model)
+            else:
+                print(f"❌ Модель '{name}' не найдена")
+            continue
+
+        if cmd_lower.startswith("set "):
+            parts = raw.split(maxsplit=2)
+            if len(parts) < 3:
+                print("Использование: set <параметр> <значение>")
+                continue
+            print(_set_param(params, model, parts[1], parts[2]))
+            continue
+
+        if cmd_lower.startswith("system"):
+            text = raw[6:].strip()
+            if text.lower() == "clear" or text == "":
+                system_prompt = ""
+                print("✓ Системный промпт очищен.")
+            else:
+                system_prompt = text
+                print(f"✓ Системный промпт: {system_prompt[:60]}")
+            continue
+
+        client = get_client_for_model(model, clients)
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": raw})
+
+        api_params: dict = {"model": model, "messages": messages}
+        for k, v in params.items():
+            if k == "thinking":
+                if v:
+                    api_params.setdefault("extra_body", {})["thinking"] = {
+                        "type": "enabled", "clear_thinking": False
+                    }
+            else:
+                api_params[k] = v
+
+        pt_est = sum(len(m["content"]) for m in messages) // 4
+        try:
+            with RequestTimer() as t:
+                response_text, _ = stream_response(client, api_params)
+            ct_est = len(response_text) // 4
+            cost = calculate_cost(pt_est, ct_est, model)
+            tracker.record(
+                command="api_advanced",
+                model=model,
+                prompt_tokens=pt_est,
+                completion_tokens=ct_est,
+                cost_usd=cost,
+                response_time_ms=t.elapsed_ms,
+                tokens_estimated=True,
+            )
+            print(f"  prompt ~{pt_est} | completion ~{ct_est} | ${cost:.6f} | {t.elapsed_ms:.0f}мс\n")
+        except Exception as e:
+            tracker.record(command="api_advanced", model=model, success=False, error=str(e))
+            print(f"\n❌ Ошибка: {e}\n")
+
+
+def _cmd_stats(tracker: UsageTracker, args: list) -> None:
+    """Показывает или сбрасывает накопленную статистику."""
+    if args and args[0] == "reset":
+        confirm = input("Сбросить всю статистику? (yes/no): ").strip().lower()
+        if confirm in ("yes", "да", "y"):
+            tracker.stats_file.unlink(missing_ok=True)
+            tracker._records.clear()
+            print("✅ Статистика сброшена.")
+        else:
+            print("Отменено.")
+        return
+    print()
+    print(tracker.format_summary())
+    print()
 
 
 def stream_response(client, params, show_thinking=True):
@@ -1274,6 +1629,20 @@ def _print_help() -> None:
 ║  (внутри чата) info           Контекст текущей сессии        ║
 ║  (внутри чата) close/q        Закрыть сессию                 ║
 ║                                                               ║
+║  ── РУЧНЫЕ API-ЗАПРОСЫ ──────────────────────────────────────║
+║  api                          Простой режим (выбор модели)   ║
+║  api advanced                 Расширенный режим:             ║
+║    (внутри) params            Текущие параметры              ║
+║    (внутри) set <p> <v>       Установить параметр            ║
+║    (внутри) reset             Сбросить к умолчаниям          ║
+║    (внутри) system <текст>    Задать системный промпт        ║
+║    (внутри) model <name>      Сменить модель                 ║
+║    (внутри) back              Выйти из режима                ║
+║                                                               ║
+║  ── СТАТИСТИКА ─────────────────────────────────────────────║
+║  stats                        Накопленная статистика         ║
+║  stats reset                  Сбросить статистику            ║
+║                                                               ║
 ║  ── ОБЩЕЕ ──────────────────────────────────────────────────║
 ║  models                       Список моделей                 ║
 ║  model <name>                 Переключить модель             ║
@@ -1302,16 +1671,18 @@ def main():
 
     storage = PostStorage(base_dir="posts")
     session_storage = SessionStorage("sessions")
+    tracker = UsageTracker(logs_dir="logs")
     current_model = "zai-org/GLM-4.7-Flash" if "cloud_ru" in clients else "gpt-5-nano"
 
+    s = tracker.get_summary()
     print("╔══════════════════════════════════════╗")
-    print("║     NEWS AGENT + CHAT  v2.0          ║")
-    print("║  AI-агент и диалоговый чат           ║")
+    print("║     NEWS AGENT + CHAT  v3.0          ║")
+    print("║  AI-агент, чат, ручные API-запросы   ║")
     print("╚══════════════════════════════════════╝")
     print(f"  Модель:      {get_available_models()[current_model]['name']}")
-    print(f"  Посты:       posts/")
-    print(f"  Сессии:      sessions/")
-    print("  'help' — справка  |  'chat' — диалоговый чат")
+    print(f"  Посты:       posts/  |  Сессии:  sessions/")
+    print(f"  Всего запросов: {s['total_requests']}  |  Токенов: {s['total_tokens']:,}  |  ${s['total_cost_usd']:.4f}")
+    print("  'help' — справка  |  'api' — запросы  |  'stats' — статистика")
     print()
 
     session_posts = 0
@@ -1426,7 +1797,7 @@ def main():
                             sess.status = "active"
                             sess.updated_at = datetime.now().isoformat()
                         chat_client = get_client_for_model(sess.model, clients)
-                        _run_chat_loop(chat_client, sess, session_storage)
+                        _run_chat_loop(chat_client, sess, session_storage, tracker)
 
             elif sub == "delete":
                 if not sub_args:
@@ -1451,7 +1822,6 @@ def main():
                         print("Нет активных сессий.")
 
             else:
-                # Новая сессия: "chat", "chat new [name]", "chat MyName"
                 if sub == "new":
                     name = " ".join(sub_args).strip()
                 elif sub and sub not in ("list", "load", "resume", "delete", "info", "new"):
@@ -1464,7 +1834,17 @@ def main():
                 )
                 session_storage.save(sess)
                 chat_client = get_client_for_model(current_model, clients)
-                _run_chat_loop(chat_client, sess, session_storage)
+                _run_chat_loop(chat_client, sess, session_storage, tracker)
+
+        elif cmd == "api":
+            sub = parts[1].lower() if len(parts) > 1 else ""
+            if sub == "advanced":
+                _cmd_api_advanced(clients, current_model, tracker)
+            else:
+                _cmd_api_simple(clients, current_model, tracker)
+
+        elif cmd == "stats":
+            _cmd_stats(tracker, parts[1:])
 
         else:
             print(f"❓ Неизвестная команда: '{cmd}'. Введите 'help'")
