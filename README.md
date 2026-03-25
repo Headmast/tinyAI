@@ -1,208 +1,208 @@
-# 🤖 LLM CLI Utility
+# TinyAI — News Agent + Диалоговый чат
 
-Простая консольная утилита для работы с OpenAI API с отслеживанием использования токенов и оптимизацией затрат.
+Консольный AI-инструмент: **генерация новостных постов** через pipeline и **диалоговый чат** с историей сессий.
 
-> **Для кого:** Начинающие разработчики, изучающие работу с LLM API  
-> **Цель:** Минимальный код для отправки запросов в OpenAI и получения ответов с детальной статистикой
+> **Стек:** Python 3.10+ · OpenAI API · Cloud.ru (GLM-4.7) · потоковый вывод · JSON-логирование
+
+---
 
 ## Возможности
 
-✅ Отправка запросов в OpenAI API (GPT-3.5-turbo)
-✅ Отслеживание использованных токенов в реальном времени
-✅ Подсчет стоимости каждого запроса и всей сессии
-✅ Оптимизация для экономии (ограничение токенов ответа)
-✅ Автоматические тесты
+| Функция | Описание |
+|---|---|
+| **News Pipeline** | 5-шаговый конвейер: Planner → Researcher → Writer → Editor → SEO |
+| **ReAct Agent** | Автономный агент с function calling и инструментами |
+| **Batch** | Пакетная генерация постов из файла тем |
+| **Chat Sessions** | Диалог с полной историей контекста, автосохранение |
+| **Context Tracker** | Визуальный индикатор использования контекстного окна |
+| **Session Resume** | Загрузка и продолжение сохранённых диалогов |
+| **JSON Logging** | Полное логирование сессий в sessions/ |
+| **Multi-model** | GLM-4.7-Flash, GLM-4.7, GPT-5-nano, GPT-5.4, GPT-5.4-mini |
 
-## 🚀 Быстрый старт (5 минут)
+---
 
-### Шаг 1: Подготовка окружения
+## Быстрый старт
+
+### 1. Установка
 
 ```bash
-# Создайте виртуальное окружение (рекомендуется)
 python3 -m venv .venv
-
-# Активируйте его
-source .venv/bin/activate  # macOS/Linux
-# или
-.venv\Scripts\activate     # Windows
-
-# Установите зависимости
-python3 -m pip install --upgrade pip
+source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-### Шаг 2: Получите API ключ OpenAI
+### 2. Настройка .env
 
-1. Перейдите на https://platform.openai.com
-2. Зарегистрируйтесь или войдите в аккаунт
-3. Откройте раздел **API Keys** (https://platform.openai.com/api-keys)
-4. Нажмите **Create new secret key**
-5. Скопируйте ключ (он начинается с `sk-...`)
-
-⚠️ **Важно:** Сохраните ключ сразу — его нельзя будет увидеть повторно!
-
-### Шаг 3: Настройте ключ в проекте
-
-```bash
-# Скопируйте шаблон
-cp .env.example .env
-
-# Откройте .env в любом редакторе
-nano .env  # или vim, code, etc.
+```env
+CLOUD_API_KEY=ваш-ключ-cloud-ru      # для GLM-4.7-Flash (бесплатно)
+OPENAI_API_KEY=sk-proj-ваш-ключ      # для GPT-5.x (платно)
 ```
 
-Вставьте ваш ключ:
-```
-OPENAI_API_KEY=sk-proj-ваш-настоящий-ключ-здесь
-```
+> Достаточно одного ключа. GLM-4.7-Flash — **бесплатная** модель Cloud.ru.
 
-Сохраните файл (в nano: `Ctrl+O`, `Enter`, `Ctrl+X`)
-
-### Шаг 4: Запустите утилиту
+### 3. Запуск
 
 ```bash
 python3 llm_cli.py
 ```
 
-## 💬 Как пользоваться
+---
 
-### Пример сессии:
+## Генерация новостных постов
 
 ```
-LLM CLI Utility (Optimized for cost efficiency)
-Type your message (or 'quit' to exit)
---------------------------------------------------
-
-You: Привет! Что такое Python?
-
-Assistant: Python — это высокоуровневый язык программирования...
-
-[Tokens used: 45 (prompt: 12, completion: 33) | Cost: $0.000084]
-
-You: Спасибо!
-
-Assistant: Пожалуйста! Если у вас есть еще вопросы...
-
-[Tokens used: 28 (prompt: 8, completion: 20) | Cost: $0.000052]
-
-You: quit
-
-==================================================
-Session summary:
-  Total prompt tokens: 20
-  Total completion tokens: 53
-  Total tokens: 73
-  Estimated cost: $0.000136
-Goodbye!
+news-agent> generate Взлёт SpaceX Starship
+news-agent> generate -t analysis Влияние ИИ на рынок труда
+news-agent> agent Создай пост о GPT-5
+news-agent> batch topics.txt
+news-agent> history 5
+news-agent> export abc12345 md
+news-agent> template list
 ```
 
-### Команды:
+**Типы постов:** breaking · analysis · digest · social · press
 
-- Введите любой вопрос → получите ответ от LLM
-- `quit`, `exit` или `q` → выход с итоговой статистикой (логи уже сохранены!)
-- `compare` → сравнение всех режимов форматирования
-- `reasoning` → сравнение способов рассуждения
-- `temperature` → сравнение температур (0, 0.7, 1.2) — только для GLM моделей
-- `modes` → показать список режимов
-- `mode N` → переключиться на режим N (1-6)
-- `models` → показать список моделей
-- `model <name>` → переключиться на модель
+**Форматы экспорта:** md · html · telegram · json · plain
 
-### Что вы увидите:
+---
 
-- **Ответ LLM** на ваш запрос
-- **Статистика токенов** по каждому запросу:
-  - Количество токенов в запросе (prompt)
-  - Количество токенов в ответе (completion)
-  - Общее количество токенов
-  - Стоимость запроса в долларах
-- **Итоговая статистика** при выходе:
-  - Суммарное использование токенов
-  - Общая стоимость сессии
+## Диалоговый чат с историей
 
-### Параметры оптимизации:
+### Ключевая концепция: API vs Веб-чат
 
-- `max_tokens: 500` — ограничение длины ответа для экономии
-- `temperature: 0.7` — баланс между креативностью и предсказуемостью
-- Модель: `gpt-3.5-turbo` — самая экономичная модель OpenAI
+| | Веб-чат (ChatGPT) | API (прямой) |
+|---|---|---|
+| История | Сервер хранит автоматически | Нужно передавать явно каждый раз |
+| Запрос | Только новое сообщение | Весь массив messages[] при каждом вызове |
+| Память | Автоматическая | Реализуем сами через sessions/ |
 
-## 🧪 Тестирование
+### Команды сессий
 
-Запуск тестов:
+```
+news-agent> chat                        # новая сессия
+news-agent> chat new Python обучение    # именованная сессия
+news-agent> chat list                   # список всех сессий
+news-agent> chat load a1b2c3d4          # загрузить по ID
+news-agent> chat resume a1b2c3d4        # продолжить закрытую
+news-agent> chat info a1b2c3d4          # детали + использование контекста
+news-agent> chat delete a1b2c3d4        # удалить сессию
+```
+
+### Внутри чата
+
+```
+you> Объясни замыкания в Python
+you> Покажи пример с декоратором
+you> info                                # использование контекста
+you> close                               # закрыть сессию
+```
+
+### Индикатор контекста (после каждого ответа)
+
+```
+Контекст: 1,234 / 128,000 токенов [████░░░░░░░░░░░░░░░░] 0.96%
+   Токены ответа: prompt ~310 | completion ~42
+```
+
+🟢 < 50% · 🟡 50–79% · 🔴 >= 80% (рекомендуется новая сессия)
+
+---
+
+## Модели
+
+| Модель | Провайдер | Цена prompt |
+|---|---|---|
+| zai-org/GLM-4.7-Flash | Cloud.ru | Бесплатно |
+| zai-org/GLM-4.7 | Cloud.ru | Бесплатно |
+| gpt-5-nano | OpenAI | $0.0002/1K |
+| gpt-5.4 | OpenAI | $0.0025/1K |
+| gpt-5.4-mini | OpenAI | $0.00075/1K |
+
+```
+news-agent> models          # список
+news-agent> model gpt-5.4   # переключить
+```
+
+---
+
+## Тестирование
+
 ```bash
-# Убедитесь, что venv активирован
-pytest test_llm_cli.py -v
+pytest -v                       # все тесты
+pytest test_sessions.py -v      # session manager
+pytest test_llm_cli.py -v       # CLI функции
 ```
 
-Тесты проверяют:
-- ✅ Обработку отсутствующего API ключа
-- ✅ Корректность параметров запросов к API
-- ✅ Точность подсчета токенов
-- ✅ Обработку ошибок и исключений
+| Файл теста | Что проверяет |
+|---|---|
+| test_sessions.py | ConversationSession, SessionStorage, lifecycle |
+| test_llm_cli.py | Модели, режимы, execute_mode, chat-функции |
+| test_model_parameters.py | Параметры моделей |
+| test_temperature.py | Диапазоны температуры |
 
-## 🛠️ Решение проблем
-
-### Ошибка: `command not found: python3`
-```bash
-# Установите Python через Homebrew (macOS)
-brew install python
-```
-
-### Ошибка: `command not found: pip` или `pytest`
-```bash
-# Используйте python3 -m для запуска модулей
-python3 -m pip install -r requirements.txt
-python3 -m pytest test_llm_cli.py -v
-```
-
-### Ошибка: `TypeError: __init__() got an unexpected keyword argument 'proxies'`
-```bash
-# Переустановите зависимости с обновлением
-python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt --force-reinstall
-```
-
-### Ошибка: `OPENAI_API_KEY not found`
-1. Проверьте, что файл `.env` существует в корне проекта
-2. Убедитесь, что в `.env` есть строка `OPENAI_API_KEY=sk-...`
-3. Перезапустите утилиту
-
-### Ошибка: `AuthenticationError` или `Invalid API key`
-1. Проверьте правильность ключа в `.env`
-2. Убедитесь, что ключ активен на https://platform.openai.com/api-keys
-3. Проверьте баланс аккаунта OpenAI
+---
 
 ## Структура проекта
 
 ```
-.
-├── llm_cli.py              # Основной код утилиты
-├── test_llm_cli.py         # Автоматические тесты
-├── requirements.txt        # Зависимости
-├── .env.example            # Пример файла с переменными окружения
-├── .gitignore              # Игнорируемые файлы для git
-├── README.md               # Этот файл
-├── TASK2_README.md         # Документация по режимам и моделям
-├── TEMPERATURE_GUIDE.md    # Руководство по сравнению температур
-├── MODELS_INFO.md          # Справочник моделей и цен
-└── logs/                   # Папка с логами (создается автоматически)
-    └── conversation_*.json # JSON-логи с расширенной статистикой
+tinyAI/
+├── llm_cli.py                  # Главный CLI
+├── requirements.txt
+├── pytest.ini
+│
+├── news_agent/
+│   ├── __init__.py             # Пакет v2.0.0
+│   ├── session_manager.py      # ConversationSession + SessionStorage
+│   ├── pipeline.py             # 5-шаговый NewsPipeline
+│   ├── agent.py                # ReAct AgentLoop
+│   ├── storage.py              # PostStorage
+│   ├── formatter.py            # OutputFormatter
+│   ├── roles.py                # Системные промпты
+│   └── tools.py                # Инструменты агента
+│
+├── test_sessions.py            # Тесты session manager
+├── test_llm_cli.py             # Тесты CLI
+├── test_model_parameters.py
+├── test_temperature.py
+│
+├── sessions/                   # Диалоговые сессии (не в VCS)
+├── posts/                      # Сгенерированные посты (не в VCS)
+├── logs/                       # Логи (не в VCS)
+│
+├── README.md
+├── TASK7_README.md             # Диалоговые сессии и контекст
+├── TASK6_README.md             # ReAct-агент
+├── TASK3_README.md             # News pipeline
+├── TASK2_README.md             # Режимы и форматирование
+├── MODELS_INFO.md              # Справочник моделей
+└── TEMPERATURE_GUIDE.md        # Руководство по температуре
 ```
 
-## 💰 Стоимость использования
+---
 
-**Текущие цены GPT-3.5-turbo:**
-- Входные токены (prompt): **$0.0015** за 1000 токенов
-- Выходные токены (completion): **$0.002** за 1000 токенов
+## Решение проблем
 
-**Примеры стоимости:**
-- Короткий вопрос (50 токенов) + ответ (150 токенов) ≈ **$0.00038**
-- Средний диалог (10 сообщений, ~1000 токенов) ≈ **$0.002**
-- Час активного использования (~5000 токенов) ≈ **$0.01**
+**command not found: python3** — установите Python: `brew install python`
 
-💡 **Совет:** Утилита ограничивает ответы до 500 токенов для экономии. Для длинных ответов увеличьте `max_tokens` в коде.
+**CLOUD_API_KEY not found** — убедитесь что .env существует и содержит ключ
 
-## Важно
+**AuthenticationError** — проверьте ключ и баланс у провайдера
 
-⚠️ Никогда не коммитьте файл `.env` с вашим API ключом в git!
-Файл `.env` уже добавлен в `.gitignore` для вашей безопасности.
+**TypeError: proxies** — `python3 -m pip install -r requirements.txt --force-reinstall`
+
+---
+
+## Документация заданий
+
+| Файл | Тема |
+|---|---|
+| TASK7_README.md | Диалоговые сессии, API vs веб-чат, контекстное окно |
+| TASK6_README.md | ReAct-агент, function calling, инструменты |
+| TASK3_README.md | News pipeline, 5 ролей, SEO |
+| TASK2_README.md | Режимы форматирования, метапромптинг |
+| MODELS_INFO.md | Сравнение моделей и цен |
+| TEMPERATURE_GUIDE.md | Влияние температуры на качество |
+
+---
+
+> **Важно:** Никогда не коммитьте .env с API ключами в git!

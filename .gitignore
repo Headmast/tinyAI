@@ -41,3 +41,9 @@ Thumbs.db
 # Logs
 logs/
 *.log
+
+# Chat sessions (содержат историю диалогов, не для VCS)
+sessions/
+
+# Generated posts
+posts/

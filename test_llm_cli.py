@@ -1,14 +1,29 @@
+"""
+Тесты для llm_cli.py.
+
+Покрывают: модели, режимы, расчёт стоимости, подсчёт слов,
+execute_mode, meta_prompting, параметры температуры,
+а также новые функции управления сессиями (_print_session_info,
+_cmd_chat_list, _cmd_chat_delete) и вспомогательные.
+"""
+
 import os
 import pytest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from llm_cli import (
-    get_available_modes, 
-    get_available_models, 
-    calculate_cost, 
+    get_available_modes,
+    get_available_models,
+    calculate_cost,
     count_words,
     execute_mode,
-    execute_meta_prompting
+    execute_meta_prompting,
+    _cmd_chat_list,
+    _cmd_chat_delete,
+    _print_session_info,
 )
+from news_agent.session_manager import ConversationSession, SessionStorage
 
 @pytest.fixture
 def mock_client():
@@ -249,3 +264,91 @@ class TestIntegration:
             modes = get_available_modes(model_name)
             assert len(modes) == 6
             assert all(m["params"]["model"] == model_name for m in modes)
+
+
+class TestChatSessionFunctions:
+    """Тесты для CLI-функций управления сессиями."""
+
+    @pytest.fixture
+    def tmp_storage(self, tmp_path):
+        return SessionStorage(str(tmp_path / "sessions"))
+
+    def test_cmd_chat_list_empty(self, tmp_storage, capsys):
+        _cmd_chat_list(tmp_storage)
+        out = capsys.readouterr().out
+        assert "сессий" in out.lower() or "нет" in out.lower()
+
+    def test_cmd_chat_list_shows_sessions(self, tmp_storage, capsys):
+        s1 = ConversationSession(name="Первая сессия")
+        s2 = ConversationSession(name="Вторая сессия")
+        tmp_storage.save(s1)
+        tmp_storage.save(s2)
+
+        _cmd_chat_list(tmp_storage)
+        out = capsys.readouterr().out
+        assert s1.session_id in out
+        assert s2.session_id in out
+
+    def test_cmd_chat_list_shows_status_icons(self, tmp_storage, capsys):
+        active = ConversationSession(name="Active")
+        closed = ConversationSession(name="Closed")
+        closed.close()
+        tmp_storage.save(active)
+        tmp_storage.save(closed)
+
+        _cmd_chat_list(tmp_storage)
+        out = capsys.readouterr().out
+        assert "●" in out
+        assert "○" in out
+
+    def test_cmd_chat_delete_existing(self, tmp_storage, capsys):
+        s = ConversationSession(name="To delete")
+        tmp_storage.save(s)
+
+        _cmd_chat_delete(s.session_id, tmp_storage)
+        out = capsys.readouterr().out
+        assert "✅" in out
+        assert tmp_storage.load(s.session_id) is None
+
+    def test_cmd_chat_delete_nonexistent(self, tmp_storage, capsys):
+        _cmd_chat_delete("nonexistent_id", tmp_storage)
+        out = capsys.readouterr().out
+        assert "❌" in out
+
+    def test_print_session_info_shows_all_fields(self, capsys):
+        s = ConversationSession(name="Test Info", model="gpt-5.4")
+        s.add_user_message("Hello")
+        s.add_assistant_message("World")
+        s.update_token_usage(10, 20)
+
+        _print_session_info(s)
+        out = capsys.readouterr().out
+
+        assert s.session_id in out
+        assert "Test Info" in out
+        assert "gpt-5.4" in out
+        assert "active" in out
+        assert "токенов" in out.lower() or "контекст" in out.lower()
+
+    def test_print_session_info_shows_context_bar(self, capsys):
+        s = ConversationSession(name="Context test")
+        _print_session_info(s)
+        out = capsys.readouterr().out
+        assert "%" in out
+
+
+class TestSessionManagerImport:
+    """Проверяем корректность импорта из session_manager в llm_cli."""
+
+    def test_model_context_sizes_imported(self):
+        from llm_cli import MODEL_CONTEXT_SIZES
+        assert "zai-org/GLM-4.7-Flash" in MODEL_CONTEXT_SIZES
+
+    def test_conversation_session_imported(self):
+        from llm_cli import ConversationSession
+        s = ConversationSession()
+        assert s.status == "active"
+
+    def test_session_storage_imported(self):
+        from llm_cli import SessionStorage
+        assert SessionStorage is not None

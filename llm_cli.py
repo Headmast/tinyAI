@@ -1,7 +1,7 @@
 """
-News Agent CLI — AI-агент для автоматической генерации новостных постов.
+News Agent CLI — AI-агент для генерации новостных постов + диалоговый чат с историей.
 
-Команды:
+Команды генерации постов:
   generate <тема>          — создать пост через 5-шаговый pipeline
   generate -t <тип> <тема> — с указанием типа (breaking/analysis/digest/social/press)
   agent <тема>             — автономный ReAct-агент
@@ -10,6 +10,21 @@ News Agent CLI — AI-агент для автоматической генер�
   export <id> <формат>     — экспортировать пост (md/html/telegram/json/plain)
   template list            — список типов постов
   template show <тип>      — показать описание типа
+
+Диалоговый чат (с сохранением истории):
+  chat                     — начать новую сессию
+  chat new [имя]           — начать именованную сессию
+  chat list                — список сохранённых сессий
+  chat load <id>           — загрузить и продолжить сессию
+  chat resume <id>         — продолжить незаконченную сессию (alias: load)
+  chat delete <id>         — удалить сессию
+  chat info [id]           — информация о сессии и использование контекста
+
+Внутри чата:
+  info                     — показать использование контекстного окна
+  close / q                — закрыть сессию и вернуться в главное меню
+
+Модели:
   models                   — список доступных моделей
   model <name>             — переключить модель
   quit / exit / q          — выход
@@ -30,6 +45,7 @@ from news_agent.storage import PostStorage
 from news_agent.pipeline import NewsPipeline
 from news_agent.agent import AgentLoop
 from news_agent.roles import POST_TYPE_GUIDES
+from news_agent.session_manager import ConversationSession, SessionStorage, MODEL_CONTEXT_SIZES
 
 load_dotenv()
 
@@ -218,6 +234,156 @@ def get_available_modes(model_name="zai-org/GLM-4.7-Flash"):
 
 def count_words(text):
     return len(text.split())
+
+
+def _chat_send(
+    client,
+    session: ConversationSession,
+    user_input: str,
+) -> tuple:
+    """
+    Отправляет сообщение модели с полной историей диалога и возвращает ответ.
+
+    Именно здесь реализуется «память» через API:
+      Веб-чат — браузер шлёт только новое сообщение, сервер хранит историю сам.
+      API     — каждый вызов stateless, мы явно передаём весь messages[] каждый раз.
+
+    Returns:
+        (response_text, prompt_tokens_est, completion_tokens_est)
+    """
+    session.add_user_message(user_input)
+    messages = session.get_messages_for_api()
+
+    params: dict = {
+        "model": session.model,
+        "messages": messages,
+        "max_completion_tokens": 8000,
+        "temperature": 0.7,
+    }
+    if session.model == "gpt-5-nano":
+        del params["temperature"]
+
+    response_text, reasoning = stream_response(client, params, show_thinking=True)
+
+    session.add_assistant_message(response_text)
+
+    prompt_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+    completion_tokens = (len(response_text) + len(reasoning)) // 4
+    session.update_token_usage(prompt_tokens, completion_tokens)
+
+    return response_text, prompt_tokens, completion_tokens
+
+
+def _print_session_info(session: ConversationSession) -> None:
+    """Выводит информацию о сессии и визуальный индикатор использования контекста."""
+    info = session.get_context_info()
+    print(f"\n{'─' * 55}")
+    print(f"  Сессия:    {session.name}")
+    print(f"  ID:        {session.session_id}")
+    print(f"  Модель:    {session.model}")
+    print(f"  Статус:    {session.status}")
+    print(f"  Сообщений: {info['messages_count']}")
+    print(f"  Создана:   {session.created_at[:16].replace('T', ' ')}")
+    print(f"  Обновлена: {session.updated_at[:16].replace('T', ' ')}")
+    print(f"  {session.format_context_bar()}")
+    if session.token_usage["total_tokens"] > 0:
+        print(f"  Токены суммарно: {session.token_usage['total_tokens']:,}")
+    print(f"{'─' * 55}\n")
+
+
+def _run_chat_loop(
+    client,
+    session: ConversationSession,
+    session_storage: SessionStorage,
+) -> None:
+    """
+    Интерактивный цикл диалога с сохранением истории.
+
+    Каждое сообщение добавляется в session.messages и при каждом
+    API-запросе передаётся вся история целиком — это механизм «памяти» модели.
+
+    Внутренние команды:
+        info        — показать использование контекста
+        close / q   — закрыть сессию и вернуться в главное меню
+    """
+    print(f"\n{'═' * 62}")
+    print(f"  💬  {session.name}")
+    print(f"  Модель: {session.model}  |  ID: {session.session_id}")
+    print(f"{'─' * 62}")
+    print("  close / q — закрыть сессию   |   info — статистика контекста")
+    print(f"{'═' * 62}\n")
+
+    while True:
+        try:
+            user_input = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n")
+            session_storage.save(session)
+            break
+
+        if not user_input:
+            continue
+
+        cmd_lower = user_input.lower()
+
+        if cmd_lower in ("close", "exit", "q", "quit"):
+            session.close()
+            session_storage.save(session)
+            info = session.get_context_info()
+            print(f"\n✅ Сессия закрыта.")
+            print(f"   Сообщений: {info['messages_count']}  |  {session.format_context_bar()}\n")
+            break
+
+        if cmd_lower == "info":
+            _print_session_info(session)
+            continue
+
+        try:
+            _, pt, ct = _chat_send(client, session, user_input)
+            session_storage.save(session)
+
+            ctx_info = session.get_context_info()
+            print(f"\n{session.format_context_bar()}")
+            print(f"   Токены ответа: prompt ~{pt:,} | completion ~{ct:,}\n")
+
+            if ctx_info["warning"]:
+                print(
+                    f"⚠️  Контекст заполнен на {ctx_info['percentage']:.1f}% "
+                    f"— рассмотрите начало новой сессии (chat new)\n"
+                )
+        except Exception as e:
+            print(f"\n❌ Ошибка: {e}\n")
+            session_storage.save(session)
+
+
+def _cmd_chat_list(session_storage: SessionStorage) -> None:
+    """Выводит список всех сохранённых сессий."""
+    sessions = session_storage.list_sessions()
+    if not sessions:
+        print("Нет сохранённых сессий.")
+        return
+
+    print(f"\n{'─' * 65}")
+    print(f"  СЕССИИ ({len(sessions)})    ● — активная  ○ — закрытая")
+    print(f"{'─' * 65}")
+    for s in sessions:
+        icon = "●" if s.get("status") == "active" else "○"
+        date = s.get("updated_at", "")[:16].replace("T", " ")
+        name = s.get("name", "Без имени")[:38]
+        msgs = s.get("messages_count", 0)
+        model_short = s.get("model", "?").split("/")[-1][:18]
+        print(f"  [{s['session_id']}] {icon} {name}")
+        print(f"           {date}  |  {msgs} сообщ.  |  {model_short}")
+    print(f"{'─' * 65}\n")
+
+
+def _cmd_chat_delete(session_id: str, session_storage: SessionStorage) -> None:
+    """Удаляет сессию по ID."""
+    if session_storage.delete(session_id):
+        print(f"✅ Сессия {session_id} удалена.")
+    else:
+        print(f"❌ Сессия '{session_id}' не найдена.")
+
 
 def stream_response(client, params, show_thinking=True):
     """Потоковый вывод ответа с поэтапной печатью и размышлениями"""
@@ -1084,26 +1250,33 @@ def _cmd_template(args: list) -> None:
 def _print_help() -> None:
     print("""
 ╔═══════════════════════════════════════════════════════════════╗
-║              NEWS AGENT CLI  —  Команды                      ║
+║         NEWS AGENT + CHAT CLI  —  Команды                    ║
 ╠═══════════════════════════════════════════════════════════════╣
+║  ── ГЕНЕРАЦИЯ ПОСТОВ ────────────────────────────────────────║
 ║  generate <тема>              Создать пост (pipeline)        ║
 ║  generate -t <тип> <тема>     С указанием типа               ║
 ║    типы: breaking, analysis, digest, social, press           ║
-║                                                               ║
 ║  agent <тема>                 Автономный ReAct-агент         ║
-║                                                               ║
 ║  batch <файл>                 Пакетная генерация из файла    ║
-║                                                               ║
 ║  history [n]                  Последние n постов (def 10)    ║
 ║  export <id> <формат>         Экспорт поста                  ║
 ║    форматы: md, html, telegram, json, plain                  ║
+║  template list/show <тип>     Типы постов                    ║
 ║                                                               ║
-║  template list                Список типов постов            ║
-║  template show <тип>          Описание типа                  ║
+║  ── ДИАЛОГОВЫЙ ЧАТ ─────────────────────────────────────────║
+║  chat                         Начать новую сессию            ║
+║  chat new [имя]               Именованная сессия             ║
+║  chat list                    Список сессий                  ║
+║  chat load <id>               Загрузить и продолжить         ║
+║  chat resume <id>             Продолжить незаконченную       ║
+║  chat delete <id>             Удалить сессию                 ║
+║  chat info [id]               Инфо + использование контекста ║
+║  (внутри чата) info           Контекст текущей сессии        ║
+║  (внутри чата) close/q        Закрыть сессию                 ║
 ║                                                               ║
+║  ── ОБЩЕЕ ──────────────────────────────────────────────────║
 ║  models                       Список моделей                 ║
 ║  model <name>                 Переключить модель             ║
-║                                                               ║
 ║  help / ?                     Эта справка                    ║
 ║  quit / exit / q              Выход                          ║
 ╚═══════════════════════════════════════════════════════════════╝""")
@@ -1128,15 +1301,17 @@ def main():
         clients["openai"] = OpenAI(api_key=openai_api_key, timeout=120.0)
 
     storage = PostStorage(base_dir="posts")
+    session_storage = SessionStorage("sessions")
     current_model = "zai-org/GLM-4.7-Flash" if "cloud_ru" in clients else "gpt-5-nano"
 
     print("╔══════════════════════════════════════╗")
-    print("║       NEWS AGENT  v1.0               ║")
-    print("║  AI-агент для генерации новостей     ║")
+    print("║     NEWS AGENT + CHAT  v2.0          ║")
+    print("║  AI-агент и диалоговый чат           ║")
     print("╚══════════════════════════════════════╝")
-    print(f"  Модель:     {get_available_models()[current_model]['name']}")
-    print(f"  Хранилище:  posts/")
-    print("  Введите 'help' для списка команд")
+    print(f"  Модель:      {get_available_models()[current_model]['name']}")
+    print(f"  Посты:       posts/")
+    print(f"  Сессии:      sessions/")
+    print("  'help' — справка  |  'chat' — диалоговый чат")
     print()
 
     session_posts = 0
@@ -1229,6 +1404,67 @@ def main():
 
         elif cmd == "template":
             _cmd_template(parts[1:])
+
+        elif cmd == "chat":
+            sub = parts[1].lower() if len(parts) > 1 else ""
+            sub_args = parts[2:] if len(parts) > 2 else []
+
+            if sub == "list":
+                _cmd_chat_list(session_storage)
+
+            elif sub in ("load", "resume"):
+                if not sub_args:
+                    print("Использование: chat load <id>")
+                else:
+                    sid = sub_args[0]
+                    sess = session_storage.load(sid)
+                    if sess is None:
+                        print(f"❌ Сессия '{sid}' не найдена.")
+                    else:
+                        if sess.status == "closed":
+                            print(f"ℹ️  Сессия '{sess.name}' была закрыта, открываем заново...")
+                            sess.status = "active"
+                            sess.updated_at = datetime.now().isoformat()
+                        chat_client = get_client_for_model(sess.model, clients)
+                        _run_chat_loop(chat_client, sess, session_storage)
+
+            elif sub == "delete":
+                if not sub_args:
+                    print("Использование: chat delete <id>")
+                else:
+                    _cmd_chat_delete(sub_args[0], session_storage)
+
+            elif sub == "info":
+                if sub_args:
+                    sess = session_storage.load(sub_args[0])
+                    if sess:
+                        _print_session_info(sess)
+                    else:
+                        print(f"❌ Сессия '{sub_args[0]}' не найдена.")
+                else:
+                    active = session_storage.find_active()
+                    if active:
+                        print(f"\nАктивных сессий: {len(active)}")
+                        for e in active:
+                            print(f"  [{e['session_id']}] {e['name']}")
+                    else:
+                        print("Нет активных сессий.")
+
+            else:
+                # Новая сессия: "chat", "chat new [name]", "chat MyName"
+                if sub == "new":
+                    name = " ".join(sub_args).strip()
+                elif sub and sub not in ("list", "load", "resume", "delete", "info", "new"):
+                    name = " ".join(parts[1:]).strip()
+                else:
+                    name = ""
+                sess = ConversationSession(
+                    name=name or f"Чат {datetime.now().strftime('%d.%m %H:%M')}",
+                    model=current_model,
+                )
+                session_storage.save(sess)
+                chat_client = get_client_for_model(current_model, clients)
+                _run_chat_loop(chat_client, sess, session_storage)
 
         else:
             print(f"❓ Неизвестная команда: '{cmd}'. Введите 'help'")
