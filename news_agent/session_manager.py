@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from news_agent.token_counter import TokenCounter
+
 
 MODEL_CONTEXT_SIZES: Dict[str, int] = {
     "zai-org/GLM-4.7-Flash": 128_000,
@@ -80,11 +82,13 @@ class ConversationSession:
 
     def estimate_tokens(self) -> int:
         """
-        Оценка числа токенов в истории (≈ 4 символа = 1 токен).
-        Точный подсчёт недоступен без отдельного API-запроса.
+        Подсчёт токенов в истории через tiktoken (если доступен)
+        или эвристику chars÷4 как fallback.
+        Включает overhead сообщений (~4 токена на сообщение).
         """
-        total_chars = sum(len(m.get("content", "")) for m in self.messages)
-        return total_chars // 4
+        counter = TokenCounter(model=self.model)
+        result = counter.count_messages(self.messages)
+        return result["total"]
 
     def add_user_message(self, content: str) -> None:
         """Добавляет сообщение пользователя в историю."""

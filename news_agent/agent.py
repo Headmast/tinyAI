@@ -14,10 +14,13 @@ from openai import OpenAI
 
 from news_agent.roles import get_role
 from news_agent.tools import TOOL_DEFINITIONS, ToolDispatcher
+from news_agent.token_counter import TokenCounter, TokenBudget
 
 
 MAX_ITERATIONS = 12
 FINAL_ANSWER_MARKER = "FINAL_POST:"
+DEFAULT_MAX_COMPLETION_TOKENS = 4_000
+DEFAULT_CONTEXT_LIMIT = 128_000
 
 
 class AgentLoop:
@@ -34,22 +37,32 @@ class AgentLoop:
         storage=None,
         verbose: bool = True,
         max_iterations: int = MAX_ITERATIONS,
+        max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS,
+        context_limit: int = DEFAULT_CONTEXT_LIMIT,
     ):
         self.client = client
         self.model = model
         self.verbose = verbose
         self.max_iterations = max_iterations
+        self.max_completion_tokens = max_completion_tokens
         self.dispatcher = ToolDispatcher(storage=storage)
+        self._counter = TokenCounter(model=model)
+        self._budget = TokenBudget(
+            context_limit=context_limit,
+            max_completion=max_completion_tokens,
+        )
         self._token_usage: Dict[str, int] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
         }
+        self._token_history: List[Dict[str, Any]] = []
 
     def run(self, task: str) -> Dict[str, Any]:
         """
         Запускает агентский цикл.
-        Возвращает dict с финальным постом и метаданными.
+        Возвращает dict с финальным постом и метаданными включая детальную
+        статистику токенов по каждой итерации.
         """
         role = get_role("autonomous")
         messages: List[Dict[str, Any]] = [
@@ -75,12 +88,42 @@ class AgentLoop:
             iteration += 1
             self._print_iteration(iteration)
 
-            response = self._call_llm(messages)
+            prompt_info = self._counter.count_messages(messages)
+            prompt_tokens_before = prompt_info["total"]
+            is_overflow, overflow_msg = self._budget.check_overflow(prompt_tokens_before)
+            if overflow_msg and self.verbose:
+                print(f"  {'🔴' if is_overflow else '⚠️ '} Токены: {overflow_msg}")
+            if is_overflow:
+                if self.verbose:
+                    print(f"\n🔴 OVERFLOW: контекстное окно переполнено, агент остановлен")
+                break
+
+            effective_max = self._budget.effective_max_completion(prompt_tokens_before)
+            response = self._call_llm(messages, max_completion_tokens=effective_max)
             assistant_message = response.choices[0].message
 
             self._update_token_usage(response)
 
-            messages.append({"role": "assistant", "content": assistant_message.content or ""})
+            resp_text = assistant_message.content or ""
+            completion_tokens = self._counter.count_response(resp_text)
+
+            if self.verbose:
+                self._print_token_breakdown(
+                    iteration=iteration,
+                    prompt_tokens=prompt_tokens_before,
+                    completion_tokens=completion_tokens,
+                    max_completion=effective_max,
+                )
+
+            self._token_history.append({
+                "iteration": iteration,
+                "prompt_tokens": prompt_tokens_before,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens_before + completion_tokens,
+                "messages_count": len(messages),
+            })
+
+            messages.append({"role": "assistant", "content": resp_text})
 
             if assistant_message.content and FINAL_ANSWER_MARKER in assistant_message.content:
                 final_post = assistant_message.content.split(FINAL_ANSWER_MARKER, 1)[1].strip()
@@ -139,21 +182,31 @@ class AgentLoop:
         if final_post is None and saved_post_id:
             final_post = f"Пост сохранён с ID: {saved_post_id}"
 
+        if self.verbose:
+            self._print_token_summary()
+
         return {
             "final_post": final_post or "Агент не создал финальный пост",
             "saved_post_id": saved_post_id,
             "iterations": iteration,
             "token_usage": self._token_usage.copy(),
+            "token_history": list(self._token_history),
+            "token_counter_method": self._counter.method_label,
         }
 
-    def _call_llm(self, messages: List[Dict[str, Any]]):
+    def _call_llm(
+        self,
+        messages: List[Dict[str, Any]],
+        max_completion_tokens: Optional[int] = None,
+    ):
         """Вызывает LLM с инструментами (function calling)."""
+        effective = max_completion_tokens or self.max_completion_tokens
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "tools": TOOL_DEFINITIONS,
             "tool_choice": "auto",
-            "max_completion_tokens": 4000,
+            "max_completion_tokens": effective,
             "temperature": 0.5,
         }
 
@@ -179,7 +232,9 @@ class AgentLoop:
             self._token_usage["total_tokens"] += getattr(usage, "total_tokens", 0)
         else:
             content = response.choices[0].message.content or ""
-            self._token_usage["total_tokens"] += len(content) // 4
+            estimated = self._counter.count_response(content)
+            self._token_usage["completion_tokens"] += estimated
+            self._token_usage["total_tokens"] += estimated
 
     def _print_agent_header(self, task: str) -> None:
         if not self.verbose:
@@ -190,6 +245,8 @@ class AgentLoop:
         print(f"  Задача:  {task[:80]}")
         print(f"  Модель:  {self.model}")
         print(f"  Лимит:   {self.max_iterations} итераций")
+        print(f"  Max completion: {self.max_completion_tokens} токенов")
+        print(f"  Счётчик токенов: {self._counter.method_label}")
         print("═" * 65)
 
     def _print_iteration(self, n: int) -> None:
@@ -201,3 +258,40 @@ class AgentLoop:
             return
         args_preview = json.dumps(args, ensure_ascii=False)[:120]
         print(f"  🔧 Вызов инструмента: {name}({args_preview}...)")
+
+    def _print_token_breakdown(
+        self,
+        iteration: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+        max_completion: int,
+    ) -> None:
+        """Выводит краткую разбивку токенов для текущей итерации."""
+        if not self.verbose:
+            return
+        context_pct = prompt_tokens / self._budget.context_limit * 100
+        print(
+            f"  📊 Токены: prompt={prompt_tokens:,} ({context_pct:.1f}%) | "
+            f"completion={completion_tokens:,} | max_completion={max_completion:,}"
+        )
+
+    def _print_token_summary(self) -> None:
+        """Выводит итоговую таблицу токенов по всем итерациям."""
+        if not self.verbose or not self._token_history:
+            return
+        print(f"\n{'─' * 65}")
+        print(f"  ИТОГ ТОКЕНОВ ПО ИТЕРАЦИЯМ  ({self._counter.method_label})")
+        print(f"  {'Iter':>4}  {'Prompt':>8}  {'Completion':>10}  {'Total':>8}  {'Msgs':>4}")
+        print(f"  {'─' * 55}")
+        for h in self._token_history:
+            print(
+                f"  {h['iteration']:>4}  {h['prompt_tokens']:>8,}  "
+                f"{h['completion_tokens']:>10,}  {h['total_tokens']:>8,}  "
+                f"{h['messages_count']:>4}"
+            )
+        total_p = self._token_usage["prompt_tokens"]
+        total_c = self._token_usage["completion_tokens"]
+        total_t = self._token_usage["total_tokens"]
+        print(f"  {'─' * 55}")
+        print(f"  {'API∑':>4}  {total_p:>8,}  {total_c:>10,}  {total_t:>8,}")
+        print(f"{'─' * 65}\n")

@@ -55,6 +55,7 @@ from news_agent.agent import AgentLoop
 from news_agent.roles import POST_TYPE_GUIDES
 from news_agent.session_manager import ConversationSession, SessionStorage, MODEL_CONTEXT_SIZES
 from news_agent.usage_tracker import UsageTracker, RequestTimer
+from news_agent.token_counter import TokenCounter, DialogTokenTracker
 
 load_dotenv()
 
@@ -337,6 +338,7 @@ def _chat_send(
     client,
     session: ConversationSession,
     user_input: str,
+    max_completion_tokens: int = 8000,
 ) -> tuple:
     """
     Отправляет сообщение модели с полной историей диалога и возвращает ответ.
@@ -345,16 +347,22 @@ def _chat_send(
       Веб-чат — браузер шлёт только новое сообщение, сервер хранит историю сам.
       API     — каждый вызов stateless, мы явно передаём весь messages[] каждый раз.
 
+    Использует TokenCounter для точного (tiktoken) или эвристического подсчёта токенов.
+
     Returns:
-        (response_text, prompt_tokens_est, completion_tokens_est)
+        (response_text, prompt_tokens, completion_tokens)
     """
     session.add_user_message(user_input)
     messages = session.get_messages_for_api()
 
+    counter = TokenCounter(model=session.model)
+    msg_info = counter.count_messages(messages)
+    prompt_tokens = msg_info["total"]
+
     params: dict = {
         "model": session.model,
         "messages": messages,
-        "max_completion_tokens": 8000,
+        "max_completion_tokens": max_completion_tokens,
         "temperature": 0.7,
     }
     if session.model == "gpt-5-nano":
@@ -364,8 +372,7 @@ def _chat_send(
 
     session.add_assistant_message(response_text)
 
-    prompt_tokens = sum(len(m.get("content", "")) for m in messages) // 4
-    completion_tokens = (len(response_text) + len(reasoning)) // 4
+    completion_tokens = counter.count_response(response_text + reasoning)
     session.update_token_usage(prompt_tokens, completion_tokens)
 
     return response_text, prompt_tokens, completion_tokens
@@ -402,13 +409,21 @@ def _run_chat_loop(
 
     Внутренние команды:
         info        — показать использование контекста
+        tokens      — показать таблицу роста токенов по ходу диалога
         close / q   — закрыть сессию и вернуться в главное меню
     """
+    counter = TokenCounter(model=session.model)
+    ctx_sizes = MODEL_CONTEXT_SIZES
+    max_ctx = ctx_sizes.get(session.model, 128_000)
+    dialog_tracker = DialogTokenTracker(model=session.model, max_tokens=max_ctx)
+
+    method_label = counter.method_label
     print(f"\n{'═' * 62}")
     print(f"  💬  {session.name}")
     print(f"  Модель: {session.model}  |  ID: {session.session_id}")
+    print(f"  Счётчик токенов: {method_label}")
     print(f"{'─' * 62}")
-    print("  close / q — закрыть сессию   |   info — статистика контекста")
+    print("  close/q — закрыть   |   info — статистика   |   tokens — рост токенов")
     print(f"{'═' * 62}\n")
 
     while True:
@@ -436,12 +451,28 @@ def _run_chat_loop(
             _print_session_info(session)
             continue
 
+        if cmd_lower == "tokens":
+            print(f"\n  Рост токенов по ходу диалога  [{method_label}]:")
+            print(dialog_tracker.format_growth_table())
+            print()
+            continue
+
         try:
             with RequestTimer() as t:
                 _, pt, ct = _chat_send(client, session, user_input)
             session_storage.save(session)
 
+            msgs = session.get_messages_for_api()
+            if len(msgs) >= 2:
+                user_msg = msgs[-2] if msgs[-2]["role"] == "user" else msgs[-1]
+                asst_msg = msgs[-1] if msgs[-1]["role"] == "assistant" else None
+                dialog_tracker.add_turn("user", user_input, msgs[:-1] if asst_msg else msgs)
+                if asst_msg:
+                    dialog_tracker.add_turn("assistant", asst_msg.get("content", ""), msgs)
+
             cost = calculate_cost(pt, ct, session.model)
+            tokens_exact = counter.is_exact
+            exact_mark = "" if tokens_exact else "~"
             if tracker is not None:
                 tracker.record(
                     command="chat",
@@ -451,12 +482,16 @@ def _run_chat_loop(
                     cost_usd=cost,
                     response_time_ms=t.elapsed_ms,
                     session_id=session.session_id,
-                    tokens_estimated=True,
+                    tokens_estimated=not tokens_exact,
                 )
 
             ctx_info = session.get_context_info()
             print(f"\n{session.format_context_bar()}")
-            print(f"   prompt ~{pt:,} | completion ~{ct:,} | ${cost:.6f} | {t.elapsed_ms:.0f}мс\n")
+            print(
+                f"   prompt {exact_mark}{pt:,} | "
+                f"completion {exact_mark}{ct:,} | "
+                f"${cost:.6f} | {t.elapsed_ms:.0f}мс  [{method_label}]\n"
+            )
 
             if ctx_info["warning"]:
                 print(
@@ -1627,6 +1662,7 @@ def _print_help() -> None:
 ║  chat delete <id>             Удалить сессию                 ║
 ║  chat info [id]               Инфо + использование контекста ║
 ║  (внутри чата) info           Контекст текущей сессии        ║
+║  (внутри чата) tokens         Таблица роста токенов          ║
 ║  (внутри чата) close/q        Закрыть сессию                 ║
 ║                                                               ║
 ║  ── РУЧНЫЕ API-ЗАПРОСЫ ──────────────────────────────────────║
