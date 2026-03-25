@@ -838,8 +838,26 @@ def _cmd_api_advanced(clients: dict, current_model: str, tracker: UsageTracker) 
 
 
 def _cmd_stats(tracker: UsageTracker, args: list) -> None:
-    """Показывает или сбрасывает накопленную статистику."""
-    if args and args[0] == "reset":
+    """
+    Статистика использования API.
+
+    stats                        — вся история
+    stats today                  — только сегодня
+    stats week                   — последние 7 дней
+    stats month                  — текущий месяц
+    stats YYYY-MM-DD             — конкретный день
+    stats YYYY-MM-DD YYYY-MM-DD  — диапазон дат
+    stats reset                  — сбросить журнал
+    """
+    if not args:
+        print()
+        print(tracker.format_summary())
+        print()
+        return
+
+    first = args[0].lower()
+
+    if first == "reset":
         confirm = input("Сбросить всю статистику? (yes/no): ").strip().lower()
         if confirm in ("yes", "да", "y"):
             tracker.stats_file.unlink(missing_ok=True)
@@ -848,8 +866,14 @@ def _cmd_stats(tracker: UsageTracker, args: list) -> None:
         else:
             print("Отменено.")
         return
+
+    second = args[1] if len(args) > 1 else None
+    start, end = tracker.parse_period_shorthand(first, second)
     print()
-    print(tracker.format_summary())
+    print(tracker.format_period_report(start, end))
+    cost = tracker.get_cost_for_period(start, end)
+    tokens = tracker.get_tokens_for_period(start, end)
+    print(f"  💰 Расходы за период: ${cost:.6f}  ({tokens['total']:,} токенов)")
     print()
 
 
@@ -1658,22 +1682,32 @@ def _cmd_generate(
         print(f"   Meta: {meta[:80]}...")
 
 
-def _cmd_agent(topic: str, client, model: str, storage: PostStorage) -> None:
+def _cmd_agent(
+    topic: str,
+    client,
+    model: str,
+    storage: PostStorage,
+    tracker: Optional[UsageTracker] = None,
+) -> None:
     """Запускает автономный ReAct-агент."""
-    agent = AgentLoop(client=client, model=model, storage=storage, verbose=True)
+    agent = AgentLoop(client=client, model=model, storage=storage, verbose=True, tracker=tracker)
     try:
-        result = agent.run(task=topic)
+        with RequestTimer() as t:
+            result = agent.run(task=topic)
     except Exception as e:
+        if tracker is not None:
+            tracker.record(command="agent", model=model, success=False, error=str(e))
         print(f"\n❌ Ошибка агента: {e}")
         import traceback; traceback.print_exc()
         return
 
     post_id = result.get("saved_post_id")
     iterations = result.get("iterations", "?")
-    tokens = result.get("token_usage", {}).get("total_tokens", "?")
+    tu = result.get("token_usage", {})
+    tokens = tu.get("total_tokens", "?")
 
     print(f"\n✅ Агент завершил работу")
-    print(f"   Итераций: {iterations}  |  Токенов ~: {tokens}")
+    print(f"   Итераций: {iterations}  |  Токенов: {tokens}  |  {t.elapsed_ms:.0f}мс")
     if post_id:
         print(f"   Сохранён пост ID: {post_id}  →  posts/{post_id}/post.md")
     print(f"\n{result['final_post']}")
@@ -1918,7 +1952,7 @@ def main():
                 print("❌ Задача не может быть пустой")
                 continue
             client = get_client_for_model(current_model, clients)
-            _cmd_agent(topic, client, current_model, storage)
+            _cmd_agent(topic, client, current_model, storage, tracker)
             session_posts += 1
 
         elif cmd == "batch":

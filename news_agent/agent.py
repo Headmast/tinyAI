@@ -15,6 +15,7 @@ from openai import OpenAI
 from news_agent.roles import get_role
 from news_agent.tools import TOOL_DEFINITIONS, ToolDispatcher
 from news_agent.token_counter import TokenCounter, TokenBudget
+from news_agent.usage_tracker import UsageTracker
 
 
 MAX_ITERATIONS = 12
@@ -39,12 +40,14 @@ class AgentLoop:
         max_iterations: int = MAX_ITERATIONS,
         max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS,
         context_limit: int = DEFAULT_CONTEXT_LIMIT,
+        tracker: Optional[UsageTracker] = None,
     ):
         self.client = client
         self.model = model
         self.verbose = verbose
         self.max_iterations = max_iterations
         self.max_completion_tokens = max_completion_tokens
+        self.tracker = tracker
         self.dispatcher = ToolDispatcher(storage=storage)
         self._counter = TokenCounter(model=model)
         self._budget = TokenBudget(
@@ -57,6 +60,7 @@ class AgentLoop:
             "total_tokens": 0,
         }
         self._token_history: List[Dict[str, Any]] = []
+        self._start_time: float = 0.0
 
     def run(self, task: str) -> Dict[str, Any]:
         """
@@ -83,6 +87,7 @@ class AgentLoop:
         iteration = 0
         final_post = None
         saved_post_id = None
+        self._start_time = time.monotonic()
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -185,14 +190,19 @@ class AgentLoop:
         if self.verbose:
             self._print_token_summary()
 
-        return {
+        elapsed_ms = round((time.monotonic() - self._start_time) * 1000, 1)
+        result: Dict[str, Any] = {
             "final_post": final_post or "Агент не создал финальный пост",
             "saved_post_id": saved_post_id,
             "iterations": iteration,
             "token_usage": self._token_usage.copy(),
             "token_history": list(self._token_history),
             "token_counter_method": self._counter.method_label,
+            "elapsed_ms": elapsed_ms,
         }
+
+        self._record_to_tracker(result)
+        return result
 
     def _call_llm(
         self,
@@ -273,6 +283,23 @@ class AgentLoop:
         print(
             f"  📊 Токены: prompt={prompt_tokens:,} ({context_pct:.1f}%) | "
             f"completion={completion_tokens:,} | max_completion={max_completion:,}"
+        )
+
+    def _record_to_tracker(self, result: Dict[str, Any]) -> None:
+        """Записывает итоги запуска агента в UsageTracker."""
+        if self.tracker is None:
+            return
+        tu = result["token_usage"]
+        self.tracker.record(
+            command="agent",
+            model=self.model,
+            prompt_tokens=tu.get("prompt_tokens", 0),
+            completion_tokens=tu.get("completion_tokens", 0),
+            cost_usd=0.0,
+            response_time_ms=result.get("elapsed_ms", 0.0),
+            success=result["final_post"] != "Агент не создал финальный пост",
+            tokens_estimated=(result["token_counter_method"] != "tiktoken"),
+            iterations=result["iterations"],
         )
 
     def _print_token_summary(self) -> None:
