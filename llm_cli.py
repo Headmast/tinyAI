@@ -22,6 +22,11 @@ News Agent CLI — AI-агент для генерации новостных п
 
 Внутри чата:
   info                     — показать использование контекстного окна
+  tokens                   — таблица роста токенов по ходу диалога
+  compress                 — статус компрессии истории
+  compress on              — включить компрессию (суммаризация каждые 10 сообщений)
+  compress off             — выключить компрессию
+  compress compare         — сравнить токены с/без компрессии
   close / q                — закрыть сессию и вернуться в главное меню
 
 Ручные запросы к API:
@@ -56,6 +61,7 @@ from news_agent.roles import POST_TYPE_GUIDES
 from news_agent.session_manager import ConversationSession, SessionStorage, MODEL_CONTEXT_SIZES
 from news_agent.usage_tracker import UsageTracker, RequestTimer
 from news_agent.token_counter import TokenCounter, DialogTokenTracker
+from news_agent.context_compressor import ContextCompressor
 
 load_dotenv()
 
@@ -457,6 +463,7 @@ def _chat_send(
 def _print_session_info(session: ConversationSession) -> None:
     """Выводит информацию о сессии и визуальный индикатор использования контекста."""
     info = session.get_context_info()
+    cmp = session.get_compression_info()
     print(f"\n{'─' * 55}")
     print(f"  Сессия:    {session.name}")
     print(f"  ID:        {session.session_id}")
@@ -468,6 +475,62 @@ def _print_session_info(session: ConversationSession) -> None:
     print(f"  {session.format_context_bar()}")
     if session.token_usage["total_tokens"] > 0:
         print(f"  Токены суммарно: {session.token_usage['total_tokens']:,}")
+    cmp_status = "✅ включена" if cmp["enabled"] else "⭕ выключена"
+    print(f"  Компрессия: {cmp_status}", end="")
+    if cmp["compression_count"] > 0:
+        print(
+            f"  |  сжатий: {cmp['compression_count']}  "
+            f"|  суммаризировано: {cmp['messages_summarized']}  "
+            f"|  сэкономлено: ~{cmp['total_tokens_saved']:,} токенов"
+        )
+    else:
+        print()
+    print(f"{'─' * 55}\n")
+
+
+def _print_compression_status(session: ConversationSession) -> None:
+    """Выводит текущий статус и статистику компрессии для сессии."""
+    cmp = session.get_compression_info()
+    status = "✅ включена" if cmp["enabled"] else "⭕ выключена"
+    print(f"\n{'─' * 55}")
+    print(f"  Компрессия истории: {status}")
+    if cmp["summarize_every"] is not None:
+        print(f"  Суммаризация каждые: {cmp['summarize_every']} сообщений")
+        print(f"  Живой хвост (keep_last_n): {cmp['keep_last_n']}")
+    if cmp["compression_count"] > 0:
+        print(f"  Выполнено сжатий:   {cmp['compression_count']}")
+        print(f"  Суммаризировано:    {cmp['messages_summarized']} сообщений")
+        print(f"  Токенов сэкономлено: ~{cmp['total_tokens_saved']:,}")
+        if session.compressor:
+            print(session.compressor.format_summary_preview())
+    else:
+        print("  Сжатий не выполнялось.")
+    print(f"{'─' * 55}")
+    print("  compress on  |  compress off  |  compress compare")
+    print(f"{'─' * 55}\n")
+
+
+def _print_compression_compare(session: ConversationSession) -> None:
+    """Сравнивает токены с компрессией и без для текущей сессии."""
+    if not session.compressor or not session.compressor.summaries:
+        tokens_full = session.estimate_tokens()
+        print(f"\n  Сжатий ещё не выполнялось.")
+        print(f"  Токенов в текущей истории: {tokens_full:,}\n")
+        return
+
+    cmp_data = session.compressor.get_comparison(session.messages)
+    savings_pct = cmp_data["savings_pct"]
+    print(f"\n{'─' * 55}")
+    print(f"  СРАВНЕНИЕ: токены с компрессией vs без")
+    print(f"{'─' * 55}")
+    print(f"  Без компрессии:  {cmp_data['full_tokens']:>8,} токенов  "
+          f"({cmp_data['full_messages_count']} сообщений)")
+    print(f"  Со сжатием:      {cmp_data['compressed_tokens']:>8,} токенов  "
+          f"({cmp_data['compressed_messages_count']} сообщений)")
+    print(f"{'─' * 55}")
+    print(f"  Экономия:        {cmp_data['tokens_saved']:>8,} токенов  "
+          f"({savings_pct:.1f}%)")
+    print(f"  Сжатий выполнено: {cmp_data['compression_count']}")
     print(f"{'─' * 55}\n")
 
 
@@ -482,11 +545,17 @@ def _run_chat_loop(
 
     Каждое сообщение добавляется в session.messages и при каждом
     API-запросе передаётся вся история целиком — это механизм «памяти» модели.
+    Если включена компрессия — старые сообщения заменяются LLM-summary
+    каждые summarize_every сообщений, экономя токены.
 
     Внутренние команды:
-        info        — показать использование контекста
-        tokens      — показать таблицу роста токенов по ходу диалога
-        close / q   — закрыть сессию и вернуться в главное меню
+        info               — показать использование контекста
+        tokens             — показать таблицу роста токенов по ходу диалога
+        compress           — показать статус компрессии
+        compress on        — включить компрессию истории
+        compress off       — выключить компрессию истории
+        compress compare   — сравнить токены с/без компрессии
+        close / q          — закрыть сессию и вернуться в главное меню
     """
     counter = TokenCounter(model=session.model)
     ctx_sizes = MODEL_CONTEXT_SIZES
@@ -494,12 +563,13 @@ def _run_chat_loop(
     dialog_tracker = DialogTokenTracker(model=session.model, max_tokens=max_ctx)
 
     method_label = counter.method_label
+    cmp_label = "  🔄 компрессия ON" if session.compression_enabled else ""
     print(f"\n{'═' * 62}")
-    print(f"  💬  {session.name}")
+    print(f"  💬  {session.name}{cmp_label}")
     print(f"  Модель: {session.model}  |  ID: {session.session_id}")
     print(f"  Счётчик токенов: {method_label}")
     print(f"{'─' * 62}")
-    print("  close/q — закрыть   |   info — статистика   |   tokens — рост токенов")
+    print("  close/q — закрыть   |   info — статистика   |   compress — сжатие")
     print(f"{'═' * 62}\n")
 
     while True:
@@ -533,9 +603,43 @@ def _run_chat_loop(
             print()
             continue
 
+        # ── Управление компрессией ────────────────────────────────
+        if cmd_lower.startswith("compress"):
+            parts = cmd_lower.split()
+            sub = parts[1] if len(parts) > 1 else ""
+
+            if sub == "on":
+                session.enable_compression(summarize_every=10, keep_last_n=6)
+                session_storage.save(session)
+                print(
+                    f"\n✅ Компрессия включена."
+                    f" Суммаризация каждые 10 сообщений, хвост: 6.\n"
+                )
+            elif sub == "off":
+                session.disable_compression()
+                session_storage.save(session)
+                print("\n⭕ Компрессия выключена. Накопленные summary сохранены.\n")
+            elif sub == "compare":
+                _print_compression_compare(session)
+            else:
+                # Без аргумента — показать статус и статистику
+                _print_compression_status(session)
+            continue
+        # ─────────────────────────────────────────────────────────
+
         try:
             with RequestTimer() as t:
                 _, pt, ct, token_cmp = _chat_send(client, session, user_input)
+
+            # Компрессия: проверяем и запускаем если нужно
+            if session.compression_enabled:
+                cstats = session.maybe_compress(client)
+                if cstats is not None:
+                    print(f"\n🔄 {cstats.format()}")
+                    if session.compressor:
+                        print(session.compressor.format_summary_preview())
+                    print()
+
             session_storage.save(session)
 
             msgs = session.get_messages_for_api()
@@ -1826,6 +1930,10 @@ def _print_help() -> None:
 ║  chat info [id]               Инфо + использование контекста ║
 ║  (внутри чата) info           Контекст текущей сессии        ║
 ║  (внутри чата) tokens         Таблица роста токенов          ║
+║  (внутри чата) compress       Статус компрессии              ║
+║  (внутри чата) compress on    Включить компрессию истории    ║
+║  (внутри чата) compress off   Выключить компрессию           ║
+║  (внутри чата) compress compare Сравнить токены с/без сжатия ║
 ║  (внутри чата) close/q        Закрыть сессию                 ║
 ║                                                               ║
 ║  ── РУЧНЫЕ API-ЗАПРОСЫ ──────────────────────────────────────║

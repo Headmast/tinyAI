@@ -6,6 +6,9 @@ SessionManager — управление диалоговыми сессиями.
 независим. Чтобы модель «помнила» диалог — нужно вручную передавать
 полный массив messages[] при каждом вызове. Именно это делает данный модуль.
 
+С версии 5.0 поддерживается компрессия контекста: длинные истории автоматически
+сжимаются через LLM-суммаризацию, что экономит токены при длинных диалогах.
+
 Классы:
     ConversationSession  — одна диалоговая сессия с историей сообщений
     SessionStorage       — файловое хранилище сессий (sessions/*.json)
@@ -18,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from news_agent.token_counter import TokenCounter
+from news_agent.context_compressor import ContextCompressor, CompressionStats
 
 
 MODEL_CONTEXT_SIZES: Dict[str, int] = {
@@ -40,15 +44,17 @@ class ConversationSession:
     обращении к API передаётся целиком — это и есть механизм «памяти» модели.
 
     Атрибуты:
-        session_id   — уникальный идентификатор (8 символов)
-        name         — человекочитаемое имя сессии
-        model        — модель, используемая в сессии
-        system_prompt — системный промпт (если задан)
-        messages     — история сообщений [{"role": ..., "content": ...}]
-        created_at   — ISO-timestamp создания
-        updated_at   — ISO-timestamp последнего изменения
-        status       — "active" | "closed"
-        token_usage  — накопленная статистика токенов
+        session_id          — уникальный идентификатор (8 символов)
+        name                — человекочитаемое имя сессии
+        model               — модель, используемая в сессии
+        system_prompt       — системный промпт (если задан)
+        messages            — история сообщений [{"role": ..., "content": ...}]
+        created_at          — ISO-timestamp создания
+        updated_at          — ISO-timestamp последнего изменения
+        status              — "active" | "closed"
+        token_usage         — накопленная статистика токенов
+        compression_enabled — True если включена компрессия истории
+        compressor          — экземпляр ContextCompressor (или None)
     """
 
     def __init__(
@@ -71,6 +77,8 @@ class ConversationSession:
             "completion_tokens": 0,
             "total_tokens": 0,
         }
+        self.compression_enabled: bool = False
+        self.compressor: Optional[ContextCompressor] = None
 
         if system_prompt:
             self.messages.append({"role": "system", "content": system_prompt})
@@ -162,14 +170,95 @@ class ConversationSession:
         """
         Возвращает список сообщений для передачи в API.
 
-        Именно здесь реализуется «память» модели через API:
-        каждый запрос содержит полную историю диалога.
+        Если компрессия включена и хотя бы одно сжатие уже выполнено —
+        возвращает сжатую версию истории: [system] + [summary] + [recent].
+        В противном случае возвращает полную историю.
         """
+        if self.compression_enabled and self.compressor and self.compressor.summaries:
+            return self.compressor.get_compressed_messages(self.messages)
         return list(self.messages)
+
+    # ─────────────────────────────────────────────────────────────
+    # Управление компрессией
+    # ─────────────────────────────────────────────────────────────
+
+    def enable_compression(
+        self,
+        summarize_every: int = 10,
+        keep_last_n: int = 6,
+    ) -> None:
+        """
+        Включает компрессию истории для этой сессии.
+
+        Если компрессор уже был создан ранее — переиспользует его
+        (сохраняет накопленные summaries).
+
+        Args:
+            summarize_every — суммаризировать каждые N сообщений (default 10)
+            keep_last_n     — хранить последние N сообщений без сжатия (default 6)
+        """
+        self.compression_enabled = True
+        if self.compressor is None:
+            self.compressor = ContextCompressor(
+                summarize_every=summarize_every,
+                keep_last_n=keep_last_n,
+                model=self.model,
+            )
+
+    def disable_compression(self) -> None:
+        """Отключает компрессию. Накопленные summaries сохраняются."""
+        self.compression_enabled = False
+
+    def maybe_compress(self, client: Any) -> Optional[CompressionStats]:
+        """
+        Проверяет необходимость компрессии и при необходимости запускает её.
+
+        Вызывать после каждого обмена (пользователь + ассистент), чтобы
+        своевременно сжимать накопленную историю.
+
+        Args:
+            client: openai.OpenAI клиент для вызова LLM-суммаризатора
+
+        Returns:
+            CompressionStats если сжатие было выполнено, иначе None
+        """
+        if not self.compression_enabled or self.compressor is None:
+            return None
+        return self.compressor.compress(client, self.messages)
+
+    def get_compression_info(self) -> Dict[str, Any]:
+        """
+        Возвращает сводку по состоянию компрессии.
+
+        Всегда возвращает dict с ключами:
+            enabled          — включена ли компрессия
+            compression_count — число выполненных сжатий
+            messages_summarized — число суммаризированных сообщений
+            total_tokens_saved  — накопленная оценка экономии токенов
+            summarize_every  — параметр порога (или None)
+            keep_last_n      — параметр «живого хвоста» (или None)
+        """
+        if not self.compressor:
+            return {
+                "enabled": self.compression_enabled,
+                "compression_count": 0,
+                "messages_summarized": 0,
+                "total_tokens_saved": 0,
+                "summarize_every": None,
+                "keep_last_n": None,
+            }
+        return {
+            "enabled": self.compression_enabled,
+            "compression_count": self.compressor.compression_count,
+            "messages_summarized": self.compressor.summary_covers_up_to,
+            "total_tokens_saved": self.compressor.total_tokens_saved,
+            "summarize_every": self.compressor.summarize_every,
+            "keep_last_n": self.compressor.keep_last_n,
+        }
 
     def to_dict(self) -> Dict[str, Any]:
         """Сериализует сессию в словарь для сохранения в JSON."""
-        return {
+        data: Dict[str, Any] = {
             "session_id": self.session_id,
             "name": self.name,
             "model": self.model,
@@ -179,7 +268,11 @@ class ConversationSession:
             "updated_at": self.updated_at,
             "status": self.status,
             "token_usage": self.token_usage,
+            "compression_enabled": self.compression_enabled,
         }
+        if self.compressor is not None:
+            data["compressor"] = self.compressor.to_dict()
+        return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ConversationSession":
@@ -197,6 +290,12 @@ class ConversationSession:
             "token_usage",
             {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         )
+        session.compression_enabled = data.get("compression_enabled", False)
+        compressor_data = data.get("compressor")
+        if compressor_data:
+            session.compressor = ContextCompressor.from_dict(compressor_data)
+        else:
+            session.compressor = None
         return session
 
     def __repr__(self) -> str:
