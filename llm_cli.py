@@ -426,6 +426,16 @@ def _chat_send(
         (response_text, prompt_tokens, completion_tokens)
     """
     session.add_user_message(user_input)
+
+    # Хук стратегии: обновление фактов / добавление в ветку
+    if session.context_strategy is not None:
+        session.context_strategy.on_user_message(
+            user_content=user_input,
+            all_messages=session.messages,
+            client=client,
+            model=session.model,
+        )
+
     messages = session.get_messages_for_api()
 
     counter = TokenCounter(model=session.model)
@@ -444,6 +454,10 @@ def _chat_send(
     response_text, reasoning, api_usage = stream_response(client, params, show_thinking=True)
 
     session.add_assistant_message(response_text)
+
+    # Хук стратегии: добавление ответа в ветку (branching)
+    if session.context_strategy is not None and hasattr(session.context_strategy, "on_assistant_message"):
+        session.context_strategy.on_assistant_message(response_text)
 
     local_completion = counter.count_response(response_text + reasoning)
     session.update_token_usage(prompt_tokens, local_completion)
@@ -532,6 +546,121 @@ def _print_compression_compare(session: ConversationSession) -> None:
           f"({savings_pct:.1f}%)")
     print(f"  Сжатий выполнено: {cmp_data['compression_count']}")
     print(f"{'─' * 55}\n")
+
+
+def _handle_strategy_command(
+    cmd: str,
+    session: ConversationSession,
+    session_storage: SessionStorage,
+) -> None:
+    """Обрабатывает команды управления стратегиями контекста."""
+    from news_agent.context_strategies import BranchingStrategy
+
+    parts = cmd.split()
+    sub = parts[1] if len(parts) > 1 else ""
+
+    if sub == "sliding":
+        window = int(parts[2]) if len(parts) > 2 else 10
+        result = session.set_strategy("sliding_window", window_size=window)
+        session_storage.save(session)
+        print(f"\n✅ {result} (окно: {window} сообщений)\n")
+
+    elif sub == "facts":
+        window = int(parts[2]) if len(parts) > 2 else 6
+        result = session.set_strategy("sticky_facts", window_size=window)
+        session_storage.save(session)
+        print(f"\n✅ {result} (окно: {window} сообщений)\n")
+
+    elif sub == "branching":
+        result = session.set_strategy("branching")
+        session_storage.save(session)
+        print(f"\n✅ {result}\n")
+        print("  Команды веток:")
+        print("    branch save <имя>          — создать checkpoint")
+        print("    branch create <имя> <от>   — создать ветку от checkpoint")
+        print("    branch switch <имя>        — переключиться на ветку")
+        print("    branch leave               — вернуться в основной диалог")
+        print("    branch list                — список веток\n")
+
+    elif sub == "off":
+        result = session.clear_strategy()
+        session_storage.save(session)
+        print(f"\n⭕ {result}\n")
+
+    else:
+        info = session.get_strategy_info()
+        print(f"\n{'─' * 55}")
+        print(f"  Стратегия контекста: {info.get('strategy', 'none')}")
+        for k, v in info.items():
+            if k not in ("strategy", "facts"):
+                print(f"    {k}: {v}")
+        if "facts" in info and info["facts"]:
+            print(f"  📌 Факты ({len(info['facts'])}):")
+            for fk, fv in info["facts"].items():
+                print(f"    • {fk}: {fv}")
+        print(f"{'─' * 55}")
+        print("  strategy sliding [N]   — Sliding Window")
+        print("  strategy facts [N]     — Sticky Facts")
+        print("  strategy branching     — Branching")
+        print("  strategy off           — отключить")
+        print(f"{'─' * 55}\n")
+
+
+def _handle_branch_command(
+    cmd: str,
+    session: ConversationSession,
+    session_storage: SessionStorage,
+) -> None:
+    """Обрабатывает команды управления ветками диалога."""
+    from news_agent.context_strategies import BranchingStrategy
+
+    strategy = session.context_strategy
+    if not isinstance(strategy, BranchingStrategy):
+        print("\n⚠️  Сначала включите стратегию branching: strategy branching\n")
+        return
+
+    parts = cmd.split()
+    sub = parts[1] if len(parts) > 1 else ""
+
+    if sub == "save":
+        name = parts[2] if len(parts) > 2 else f"cp_{len(strategy.checkpoints) + 1}"
+        result = strategy.save_checkpoint(name, session.messages)
+        session_storage.save(session)
+        print(f"\n✅ {result}\n")
+
+    elif sub == "create":
+        if len(parts) < 4:
+            print("\n⚠️  Формат: branch create <имя_ветки> <имя_checkpoint>\n")
+            return
+        branch_name = parts[2]
+        cp_name = parts[3]
+        result = strategy.create_branch(branch_name, cp_name)
+        session_storage.save(session)
+        print(f"\n{'✅' if 'создана' in result else '⚠️ '} {result}\n")
+
+    elif sub == "switch":
+        if len(parts) < 3:
+            print("\n⚠️  Формат: branch switch <имя_ветки>\n")
+            return
+        result = strategy.switch_branch(parts[2])
+        session_storage.save(session)
+        print(f"\n🔀 {result}\n")
+
+    elif sub == "leave":
+        result = strategy.leave_branch()
+        session_storage.save(session)
+        print(f"\n🔀 {result}\n")
+
+    elif sub == "list":
+        print(f"\n{strategy.list_info()}\n")
+
+    else:
+        print("\n  Команды веток:")
+        print("    branch save <имя>          — создать checkpoint")
+        print("    branch create <имя> <от>   — создать ветку от checkpoint")
+        print("    branch switch <имя>        — переключиться на ветку")
+        print("    branch leave               — вернуться в основной диалог")
+        print("    branch list                — список веток\n")
 
 
 def _run_chat_loop(
@@ -624,6 +753,16 @@ def _run_chat_loop(
             else:
                 # Без аргумента — показать статус и статистику
                 _print_compression_status(session)
+            continue
+        # ─────────────────────────────────────────────────────────
+
+        # ── Управление стратегиями контекста ──────────────────────
+        if cmd_lower.startswith("strategy"):
+            _handle_strategy_command(cmd_lower, session, session_storage)
+            continue
+
+        if cmd_lower.startswith("branch"):
+            _handle_branch_command(cmd_lower, session, session_storage)
             continue
         # ─────────────────────────────────────────────────────────
 

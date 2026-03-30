@@ -22,6 +22,10 @@ from typing import Any, Dict, List, Optional
 
 from news_agent.token_counter import TokenCounter
 from news_agent.context_compressor import ContextCompressor, CompressionStats
+from news_agent.context_strategies import (
+    ContextStrategy, create_strategy, strategy_from_dict,
+    SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy,
+)
 
 
 MODEL_CONTEXT_SIZES: Dict[str, int] = {
@@ -79,6 +83,7 @@ class ConversationSession:
         }
         self.compression_enabled: bool = False
         self.compressor: Optional[ContextCompressor] = None
+        self.context_strategy: Optional[ContextStrategy] = None
 
         if system_prompt:
             self.messages.append({"role": "system", "content": system_prompt})
@@ -170,13 +175,43 @@ class ConversationSession:
         """
         Возвращает список сообщений для передачи в API.
 
-        Если компрессия включена и хотя бы одно сжатие уже выполнено —
-        возвращает сжатую версию истории: [system] + [summary] + [recent].
-        В противном случае возвращает полную историю.
+        Приоритет: context_strategy > compression > полная история.
         """
+        if self.context_strategy is not None:
+            return self.context_strategy.get_messages_for_api(self.messages)
         if self.compression_enabled and self.compressor and self.compressor.summaries:
             return self.compressor.get_compressed_messages(self.messages)
         return list(self.messages)
+
+    # ─────────────────────────────────────────────────────────────
+    # Управление стратегиями контекста
+    # ─────────────────────────────────────────────────────────────
+
+    def set_strategy(self, strategy_name: str, **kwargs) -> str:
+        """
+        Устанавливает стратегию управления контекстом.
+
+        Args:
+            strategy_name: имя стратегии (sliding_window, sticky_facts, branching)
+            **kwargs: параметры стратегии (window_size и т.д.)
+
+        Returns:
+            Строка-подтверждение
+        """
+        self.context_strategy = create_strategy(strategy_name, **kwargs)
+        return f"Стратегия '{strategy_name}' активирована"
+
+    def clear_strategy(self) -> str:
+        """Отключает стратегию контекста (возврат к полной истории)."""
+        old_name = self.context_strategy.name if self.context_strategy else "none"
+        self.context_strategy = None
+        return f"Стратегия '{old_name}' отключена, используется полная история"
+
+    def get_strategy_info(self) -> Dict[str, Any]:
+        """Возвращает информацию о текущей стратегии."""
+        if self.context_strategy is None:
+            return {"strategy": "none", "description": "Полная история (без стратегии)"}
+        return self.context_strategy.get_stats()
 
     # ─────────────────────────────────────────────────────────────
     # Управление компрессией
@@ -272,6 +307,8 @@ class ConversationSession:
         }
         if self.compressor is not None:
             data["compressor"] = self.compressor.to_dict()
+        if self.context_strategy is not None:
+            data["context_strategy"] = self.context_strategy.to_dict()
         return data
 
     @classmethod
@@ -296,6 +333,11 @@ class ConversationSession:
             session.compressor = ContextCompressor.from_dict(compressor_data)
         else:
             session.compressor = None
+        strategy_data = data.get("context_strategy")
+        if strategy_data:
+            session.context_strategy = strategy_from_dict(strategy_data)
+        else:
+            session.context_strategy = None
         return session
 
     def __repr__(self) -> str:

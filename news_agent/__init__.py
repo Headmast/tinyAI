@@ -15,6 +15,11 @@ from news_agent.session_manager import ConversationSession, SessionStorage
 from news_agent.usage_tracker import UsageTracker, RequestTimer, RequestRecord
 from news_agent.token_counter import TokenCounter, DialogTokenTracker, TokenBudget
 from news_agent.context_compressor import ContextCompressor, CompressionStats
+from news_agent.context_strategies import (
+    ContextStrategy, SlidingWindowStrategy, StickyFactsStrategy,
+    BranchingStrategy, create_strategy, strategy_from_dict,
+)
+from news_agent.strategy_logger import StrategyLogger
 
 __all__ = [
     "PostStorage", "NewsPipeline", "AgentLoop",
@@ -22,5 +27,8 @@ __all__ = [
     "UsageTracker", "RequestTimer", "RequestRecord",
     "TokenCounter", "DialogTokenTracker", "TokenBudget",
     "ContextCompressor", "CompressionStats",
+    "ContextStrategy", "SlidingWindowStrategy", "StickyFactsStrategy",
+    "BranchingStrategy", "create_strategy", "strategy_from_dict",
+    "StrategyLogger",
 ]
-__version__ = "5.0.0"
+__version__ = "6.0.0"
