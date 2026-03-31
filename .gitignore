@@ -47,3 +47,6 @@ sessions/
 
 # Generated posts
 posts/
+
+# Memory agent data
+memory_data/
