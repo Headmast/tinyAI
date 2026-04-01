@@ -302,13 +302,27 @@ class MemoryManager:
         self.short_term = ShortTermMemory(max_messages=short_term_limit)
         self.working = WorkingMemory()
         self.long_term = LongTermMemory(storage_path=long_term_path)
+        self._profile_section: str = ""
+
+    def set_profile_section(self, section: str) -> None:
+        """Устанавливает секцию профиля пользователя для инъекции в system prompt."""
+        self._profile_section = section
+
+    def clear_profile_section(self) -> None:
+        """Очищает секцию профиля."""
+        self._profile_section = ""
 
     def build_system_prompt(self, base_prompt: str) -> str:
         """
-        Собирает финальный system prompt, обогащённый данными из рабочей
-        и долговременной памяти.
+        Собирает финальный system prompt, обогащённый данными из профиля,
+        рабочей и долговременной памяти.
         """
         sections: List[str] = [base_prompt]
+
+        if self._profile_section:
+            sections.append(
+                f"\n--- ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ ---\n{self._profile_section}"
+            )
 
         lt_summary = self.long_term.get_summary()
         if lt_summary != "(долговременная память пуста)":
