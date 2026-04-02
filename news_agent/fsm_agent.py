@@ -84,17 +84,14 @@ STEP_PROMPTS: Dict[str, str] = {
         "}"
     ),
     "write_body": (
-        'Напиши основной текст статьи «{title}» по всем разделам плана.\n'
-        "Разделы: {sections_context}\n"
-        "Уже написанное вступление: {intro_text}\n"
-        "Верни строго JSON:\n"
-        "{\n"
-        '  "sections": [\n'
-        '    {"name": "название раздела", "text": "полный текст раздела"},\n'
-        '    ...\n'
-        "  ],\n"
-        '  "total_word_count": 500\n'
-        "}"
+        'Напиши основной текст статьи «{title}» по разделам плана.\n'
+        "Разделы плана: {sections_context}\n"
+        "Вступление уже написано (не повторяй его): {intro_text}\n\n"
+        "Требования:\n"
+        "- Используй ## для заголовка каждого раздела\n"
+        "- Пиши связный журналистский текст, 3-5 предложений на раздел\n"
+        "- Только текст статьи — без JSON, без пояснений, без markdown-кода\n"
+        "- НЕ пиши Введение и Заключение (они пишутся отдельно)"
     ),
     "write_conclusion": (
         'Напиши заключение для статьи «{title}».\n'
@@ -200,27 +197,30 @@ def _build_step_prompt(step_name: str, article_data: Dict[str, Any]) -> str:
     )
     ctx.setdefault(
         "outline_context",
-        json.dumps(article_data.get("sections", []), ensure_ascii=False),
+        json.dumps(article_data.get("sections", []), ensure_ascii=False)[:1200],
     )
     ctx.setdefault(
         "sections_context",
         json.dumps(
-            [s for s in article_data.get("sections", []) if "key_points" in s],
+            [
+                {"name": s.get("name", ""), "key_points": s.get("key_points", [])}
+                for s in article_data.get("sections", [])
+            ],
             ensure_ascii=False,
-        ),
+        )[:1200],
     )
-    ctx.setdefault("intro_text", article_data.get("intro_text", ""))
+    ctx.setdefault("intro_text", article_data.get("intro_text", "")[:600])
     ctx.setdefault(
         "body_summary",
         json.dumps(
             [
-                {"name": s.get("name", ""), "snippet": s.get("text", "")[:120]}
+                {"name": s.get("name", ""), "snippet": s.get("text", "")[:80]}
                 for s in article_data.get("sections", [])
             ],
             ensure_ascii=False,
-        ),
+        )[:800],
     )
-    ctx.setdefault("full_article", _build_full_article(article_data)[:4000])
+    ctx.setdefault("full_article", _build_full_article(article_data)[:2500])
     ctx.setdefault(
         "quality_scores",
         json.dumps(article_data.get("scores", {}), ensure_ascii=False),
@@ -351,7 +351,16 @@ class ArticleFSMAgent:
         """
         Вызывает LLM для выполнения одного шага.
         Возвращает dict с результатом или None при неустранимой ошибке.
+        Если тема уже задана — choose_topic выполняется без LLM.
         """
+        if step_name == "choose_topic" and state.topic:
+            return {
+                "topic": state.topic,
+                "rationale": "Тема задана пользователем",
+                "target_audience": "Специалисты и интересующиеся AI/ML",
+                "article_type": "analysis",
+            }
+
         prompt = _build_step_prompt(step_name, state.article_data)
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -367,6 +376,8 @@ class ArticleFSMAgent:
                     temperature=self.temperature,
                 )
                 raw = response.choices[0].message.content or ""
+                if step_name == "write_body":
+                    return self._parse_body_text(raw)
                 return self._parse_json_response(raw)
             except Exception as e:
                 if attempt < 2:
@@ -377,6 +388,44 @@ class ArticleFSMAgent:
                     if self.verbose:
                         print(f"  ❌ Шаг {step_name} провалился после 3 попыток: {e}")
                     return None
+
+    def _parse_body_text(self, raw: str) -> Dict[str, Any]:
+        """
+        Парсит plain-text ответ для write_body.
+        Разбивает текст по ## заголовкам в список секций.
+        Если заголовков нет — кладёт весь текст в одну секцию.
+        """
+        text = raw.strip()
+        if not text:
+            return {"sections": [], "total_word_count": 0}
+
+        sections: List[Dict[str, str]] = []
+        current_name = ""
+        current_lines: List[str] = []
+
+        for line in text.split("\n"):
+            if line.startswith("## "):
+                if current_lines:
+                    sections.append({
+                        "name": current_name,
+                        "text": "\n".join(current_lines).strip(),
+                    })
+                current_name = line[3:].strip()
+                current_lines = []
+            else:
+                current_lines.append(line)
+
+        if current_lines:
+            sections.append({
+                "name": current_name or "Основной текст",
+                "text": "\n".join(current_lines).strip(),
+            })
+
+        if not sections:
+            sections = [{"name": "Основной текст", "text": text}]
+
+        word_count = sum(len(s["text"].split()) for s in sections)
+        return {"sections": sections, "total_word_count": word_count}
 
     def _parse_json_response(self, raw: str) -> Dict[str, Any]:
         """Извлекает JSON из ответа LLM. Поддерживает ```json ... ``` блоки."""

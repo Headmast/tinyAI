@@ -627,7 +627,7 @@ class TestArticleFSMAgentRun:
         call_count = [0]
 
         step_order = [
-            "choose_topic", "analyze_topic", "create_outline",
+            "analyze_topic", "create_outline",
             "write_intro", "write_body", "write_conclusion",
             "check_structure", "score_quality", "final_edit",
         ]
