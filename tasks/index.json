@@ -1,0 +1,32 @@
+[
+  {
+    "task_id": "dcef0a09",
+    "phase": "done",
+    "current_step": 0,
+    "topic": "Инфляция токенов и подписки AI-сервисов: как меняется рынок ML-моделей",
+    "paused": false,
+    "completed_steps": 9,
+    "created_at": "2026-04-02T13:02:59.695557",
+    "updated_at": "2026-04-02T13:09:26.250100"
+  },
+  {
+    "task_id": "8cd55917",
+    "phase": "done",
+    "current_step": 0,
+    "topic": "Инфляция токенов и подписки AI-сервисов: как меняется рынок ML-моделей",
+    "paused": false,
+    "completed_steps": 9,
+    "created_at": "2026-04-02T12:57:12.721440",
+    "updated_at": "2026-04-02T13:06:13.488348"
+  },
+  {
+    "task_id": "2624c021",
+    "phase": "done",
+    "current_step": 0,
+    "topic": "Инфляция токенов и подписки AI-сервисов: как меняется рынок ML-моделей",
+    "paused": false,
+    "completed_steps": 9,
+    "created_at": "2026-04-02T12:46:14.008188",
+    "updated_at": "2026-04-02T12:55:34.703537"
+  }
+]
