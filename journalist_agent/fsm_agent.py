@@ -74,6 +74,7 @@ class JournalistFSMAgent:
         storage: Optional[JournalistTaskStorage] = None,
         invariant_store: Optional[InvariantStore] = None,
         verbose: bool = True,
+        stream_tokens: bool = True,
         max_completion_tokens: int = 3000,
         temperature: float = 0.6,
     ) -> None:
@@ -82,6 +83,7 @@ class JournalistFSMAgent:
         self.storage = storage or JournalistTaskStorage()
         self.store = invariant_store or InvariantStore()
         self.verbose = verbose
+        self.stream_tokens = stream_tokens
         self.max_completion_tokens = max_completion_tokens
         self.temperature = temperature
         self._interrupted = False
@@ -311,18 +313,10 @@ class JournalistFSMAgent:
 
         for attempt in range(3):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    max_completion_tokens=self.max_completion_tokens,
-                    temperature=self.temperature,
-                )
-                msg = response.choices[0].message
-                raw = msg.content or ""
-                reasoning = getattr(msg, "reasoning", None) or ""
-
-                if self.verbose:
-                    self._print_llm_response(step, reasoning, raw, response)
+                if self.stream_tokens and self.verbose:
+                    raw, reasoning, usage_str = self._stream_call(step, messages)
+                else:
+                    raw, reasoning, usage_str = self._blocking_call(step, messages)
 
                 if step.output_format == "text":
                     return self._parse_text_response(raw, step.state)
@@ -331,13 +325,115 @@ class JournalistFSMAgent:
             except Exception as e:
                 if attempt < 2:
                     if self.verbose:
-                        print(f"\n    ⚠️  API ошибка (попытка {attempt + 1}/3): {e}")
-                        print(f"    Повтор через 2с...")
+                        print(f"\n    ⚠️  API ошибка (попытка {attempt + 1}/3): {e}", flush=True)
+                        print(f"    Повтор через 2с...", flush=True)
                     time.sleep(2)
                 else:
                     if self.verbose:
-                        print(f"\n    ❌ Шаг провалился после 3 попыток: {e}")
+                        print(f"\n    ❌ Шаг провалился после 3 попыток: {e}", flush=True)
                     return None
+
+    def _stream_call(
+        self,
+        step: StepConfig,
+        messages: List[Dict[str, Any]],
+    ) -> tuple:
+        """Стриминг API: печатает reasoning и content токен за токеном в реальном времени."""
+        W = 65
+        hr_thick = "▲" * W
+        hr_thin  = "  " + "─" * (W - 2)
+
+        print("\n" + hr_thick, flush=True)
+        print("  📥 ОТВЕТ LLM  [" + step.label + "]  (streaming)", flush=True)
+        print(hr_thick, flush=True)
+
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_completion_tokens=self.max_completion_tokens,
+            temperature=self.temperature,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+
+        reasoning_parts: List[str] = []
+        content_parts:   List[str] = []
+        usage_info = None
+        in_reasoning = False
+        in_content   = False
+
+        for chunk in stream:
+            if hasattr(chunk, "usage") and chunk.usage is not None:
+                usage_info = chunk.usage
+
+            if not chunk.choices:
+                continue
+
+            delta = chunk.choices[0].delta
+
+            # reasoning токены (thinking phase)
+            r_tok = getattr(delta, "reasoning", None)
+            if r_tok:
+                if not in_reasoning:
+                    print("\n  💭 REASONING:", flush=True)
+                    print(hr_thin, flush=True)
+                    in_reasoning = True
+                print(r_tok, end="", flush=True)
+                reasoning_parts.append(r_tok)
+
+            # content токены (answer phase)
+            c_tok = delta.content
+            if c_tok:
+                if not in_content:
+                    if in_reasoning:
+                        print("\n" + hr_thin, flush=True)
+                    print("\n  📝 CONTENT:", flush=True)
+                    print(hr_thin, flush=True)
+                    in_content = True
+                print(c_tok, end="", flush=True)
+                content_parts.append(c_tok)
+
+        reasoning = "".join(reasoning_parts)
+        content   = "".join(content_parts)
+
+        usage_str = ""
+        if usage_info:
+            usage_str = (
+                "prompt=" + str(usage_info.prompt_tokens) +
+                "  completion=" + str(usage_info.completion_tokens) +
+                "  total=" + str(usage_info.total_tokens)
+            )
+        print("\n" + hr_thin, flush=True)
+        print("  🔢 Токены: " + (usage_str or "(streaming — нет данных)"), flush=True)
+        print("  reasoning: " + str(len(reasoning)) + " симв.  |  content: " + str(len(content)) + " симв.", flush=True)
+        print(hr_thick, flush=True)
+
+        return content, reasoning, usage_str
+
+    def _blocking_call(
+        self,
+        step: StepConfig,
+        messages: List[Dict[str, Any]],
+    ) -> tuple:
+        """Блокирующий API вызов (без стриминга)."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_completion_tokens=self.max_completion_tokens,
+            temperature=self.temperature,
+        )
+        msg       = response.choices[0].message
+        raw       = msg.content or ""
+        reasoning = getattr(msg, "reasoning", None) or ""
+        if self.verbose:
+            self._print_llm_response(step, reasoning, raw, response)
+        usage     = response.usage
+        usage_str = (
+            f"prompt={usage.prompt_tokens}  "
+            f"completion={usage.completion_tokens}  "
+            f"total={usage.total_tokens}"
+        ) if usage else ""
+        return raw, reasoning, usage_str
 
     def _assemble_final(self, task: JournalistTask) -> Dict[str, Any]:
         """Собирает финальный текст из накопленных step_results."""

@@ -266,6 +266,7 @@ def main() -> None:
         model=args.model,
         storage=storage,
         verbose=True,
+        stream_tokens=True,
         max_completion_tokens=args.max_tokens,
         temperature=0.6,
     )
