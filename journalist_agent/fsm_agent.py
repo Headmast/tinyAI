@@ -306,6 +306,9 @@ class JournalistFSMAgent:
             {"role": "user", "content": prompt},
         ]
 
+        if self.verbose:
+            self._print_prompt(step, SYSTEM_PROMPT, prompt)
+
         for attempt in range(3):
             try:
                 response = self.client.chat.completions.create(
@@ -314,7 +317,12 @@ class JournalistFSMAgent:
                     max_completion_tokens=self.max_completion_tokens,
                     temperature=self.temperature,
                 )
-                raw = response.choices[0].message.content or ""
+                msg = response.choices[0].message
+                raw = msg.content or ""
+                reasoning = getattr(msg, "reasoning", None) or ""
+
+                if self.verbose:
+                    self._print_llm_response(step, reasoning, raw, response)
 
                 if step.output_format == "text":
                     return self._parse_text_response(raw, step.state)
@@ -323,11 +331,12 @@ class JournalistFSMAgent:
             except Exception as e:
                 if attempt < 2:
                     if self.verbose:
-                        print(f"    ⚠️  API ошибка (попытка {attempt + 1}/3): {e}. Повтор через 2с...")
+                        print(f"\n    ⚠️  API ошибка (попытка {attempt + 1}/3): {e}")
+                        print(f"    Повтор через 2с...")
                     time.sleep(2)
                 else:
                     if self.verbose:
-                        print(f"    ❌ Шаг провалился после 3 попыток: {e}")
+                        print(f"\n    ❌ Шаг провалился после 3 попыток: {e}")
                     return None
 
     def _assemble_final(self, task: JournalistTask) -> Dict[str, Any]:
@@ -407,6 +416,62 @@ class JournalistFSMAgent:
     # ─────────────────────────────────────────────────────────
     # Форматированный вывод
     # ─────────────────────────────────────────────────────────
+
+    def _print_prompt(
+        self,
+        step: StepConfig,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> None:
+        """Выводит промпт отправленный в LLM."""
+        print(f"\n{'▼' * 65}")
+        print(f"  📤 ПРОМПТ → LLM  [{step.label}]")
+        print(f"{'▼' * 65}")
+        print(f"  [SYSTEM] (первые 200 симв.)")
+        print(f"  {system_prompt[:200].replace(chr(10), ' ')}...")
+        print(f"  {'─' * 63}")
+        print(f"  [USER PROMPT]")
+        for line in user_prompt.split("\n"):
+            print(f"  {line}")
+        print(f"{'▼' * 65}")
+
+    def _print_llm_response(
+        self,
+        step: StepConfig,
+        reasoning: str,
+        content: str,
+        response: Any,
+    ) -> None:
+        """Выводит reasoning-цепочку и контент ответа LLM."""
+        usage = getattr(response, "usage", None)
+        tokens_info = ""
+        if usage:
+            tokens_info = (
+                f"prompt={usage.prompt_tokens}  "
+                f"completion={usage.completion_tokens}  "
+                f"total={usage.total_tokens}"
+            )
+
+        print(f"\n{'▲' * 65}")
+        print(f"  📥 ОТВЕТ LLM  [{step.label}]")
+        if tokens_info:
+            print(f"  🔢 Токены: {tokens_info}")
+        print(f"{'▲' * 65}")
+
+        if reasoning:
+            print(f"  💭 REASONING CHAIN ({len(reasoning)} симв.):")
+            print(f"  {'─' * 63}")
+            for line in reasoning.split("\n"):
+                print(f"  {line}")
+            print(f"  {'─' * 63}")
+        else:
+            print(f"  💭 reasoning: (пусто)")
+
+        print(f"  📝 CONTENT ({len(content)} симв.):")
+        print(f"  {'─' * 63}")
+        for line in (content or "(пусто)").split("\n"):
+            print(f"  {line}")
+        print(f"{'▲' * 65}")
 
     def _print_header(self, task: JournalistTask, is_new: bool = True) -> None:
         if not self.verbose:
