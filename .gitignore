@@ -50,3 +50,22 @@ posts/
 
 # Memory agent data
 memory_data/
+
+# Journalist FSM — runtime demo storage (task JSON + run logs)
+journalist_tasks_demo/
+
+# Memory agent task storage
+tasks/
+
+# Temp / debug scripts (not part of codebase)
+test_api_log.py
+
+# Comparison output artifacts
+comparison_output.log
+chuck_comparison_output.log
+riddle_test_output.log
+chuck_norris_comparison_*.json
+chuck_norris_comparison_*.md
+model_comparison_*.json
+model_comparison_*.md
+telegram_articles_*.json

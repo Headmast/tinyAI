@@ -1,144 +1,39 @@
-# TinyAI — News Agent + Диалоговый чат
+# TinyAI — AI Курс (15 дней)
 
-Консольный AI-инструмент: **генерация новостных постов** через pipeline и **диалоговый чат** с историей сессий.
+Учебный проект: 15 дней от базового промптинга до продвинутого FSM-агента с reasoning-моделью.
 
-> **Стек:** Python 3.10+ · OpenAI API · Cloud.ru (GLM-4.7) · потоковый вывод · JSON-логирование
-
----
-
-## Возможности
-
-| Функция | Описание |
-|---|---|
-| **News Pipeline** | 5-шаговый конвейер: Planner → Researcher → Writer → Editor → SEO |
-| **ReAct Agent** | Автономный агент с function calling и инструментами |
-| **Batch** | Пакетная генерация постов из файла тем |
-| **Chat Sessions** | Диалог с полной историей контекста, автосохранение |
-| **Context Tracker** | Визуальный индикатор использования контекстного окна |
-| **Session Resume** | Загрузка и продолжение сохранённых диалогов |
-| **JSON Logging** | Полное логирование сессий в sessions/ |
-| **Multi-model** | GLM-4.7-Flash, GLM-4.7, GPT-5-nano, GPT-5.4, GPT-5.4-mini |
+> **Стек:** Python 3.10+ · Cloud.ru Foundation Models API · `zai-org/GLM-4.7` (reasoning) · OpenAI-compatible SDK
 
 ---
 
 ## Быстрый старт
 
-### 1. Установка
-
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-```
+# 1. Окружение
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-### 2. Настройка .env
+# 2. Ключи
+cp .env.example .env   # или создай вручную
+# Добавь: CLOUD_API_KEY=<ключ от cloud.ru>
 
-```env
-CLOUD_API_KEY=ваш-ключ-cloud-ru      # для GLM-4.7-Flash (бесплатно)
-OPENAI_API_KEY=sk-proj-ваш-ключ      # для GPT-5.x (платно)
-```
-
-> Достаточно одного ключа. GLM-4.7-Flash — **бесплатная** модель Cloud.ru.
-
-### 3. Запуск
-
-```bash
+# 3. Запуск главного CLI
 python3 llm_cli.py
+
+# 4. Запуск FSM-агента журналиста (задача 15)
+python3 -u run_3topics.py --model zai-org/GLM-4.7 --max-tokens 4000
 ```
-
----
-
-## Генерация новостных постов
-
-```
-news-agent> generate Взлёт SpaceX Starship
-news-agent> generate -t analysis Влияние ИИ на рынок труда
-news-agent> agent Создай пост о GPT-5
-news-agent> batch topics.txt
-news-agent> history 5
-news-agent> export abc12345 md
-news-agent> template list
-```
-
-**Типы постов:** breaking · analysis · digest · social · press
-
-**Форматы экспорта:** md · html · telegram · json · plain
-
----
-
-## Диалоговый чат с историей
-
-### Ключевая концепция: API vs Веб-чат
-
-| | Веб-чат (ChatGPT) | API (прямой) |
-|---|---|---|
-| История | Сервер хранит автоматически | Нужно передавать явно каждый раз |
-| Запрос | Только новое сообщение | Весь массив messages[] при каждом вызове |
-| Память | Автоматическая | Реализуем сами через sessions/ |
-
-### Команды сессий
-
-```
-news-agent> chat                        # новая сессия
-news-agent> chat new Python обучение    # именованная сессия
-news-agent> chat list                   # список всех сессий
-news-agent> chat load a1b2c3d4          # загрузить по ID
-news-agent> chat resume a1b2c3d4        # продолжить закрытую
-news-agent> chat info a1b2c3d4          # детали + использование контекста
-news-agent> chat delete a1b2c3d4        # удалить сессию
-```
-
-### Внутри чата
-
-```
-you> Объясни замыкания в Python
-you> Покажи пример с декоратором
-you> info                                # использование контекста
-you> close                               # закрыть сессию
-```
-
-### Индикатор контекста (после каждого ответа)
-
-```
-Контекст: 1,234 / 128,000 токенов [████░░░░░░░░░░░░░░░░] 0.96%
-   Токены ответа: prompt ~310 | completion ~42
-```
-
-🟢 < 50% · 🟡 50–79% · 🔴 >= 80% (рекомендуется новая сессия)
 
 ---
 
 ## Модели
 
-| Модель | Провайдер | Цена prompt |
+| Модель | Провайдер | Особенности |
 |---|---|---|
-| zai-org/GLM-4.7-Flash | Cloud.ru | Бесплатно |
-| zai-org/GLM-4.7 | Cloud.ru | Бесплатно |
-| gpt-5-nano | OpenAI | $0.0002/1K |
-| gpt-5.4 | OpenAI | $0.0025/1K |
-| gpt-5.4-mini | OpenAI | $0.00075/1K |
+| `zai-org/GLM-4.7` | Cloud.ru | Reasoning (thinking chains), бесплатно |
+| `zai-org/GLM-4.7-Flash` | Cloud.ru | Быстрый, бесплатно |
 
-```
-news-agent> models          # список
-news-agent> model gpt-5.4   # переключить
-```
-
----
-
-## Тестирование
-
-```bash
-pytest -v                       # все тесты
-pytest test_sessions.py -v      # session manager
-pytest test_llm_cli.py -v       # CLI функции
-```
-
-| Файл теста | Что проверяет |
-|---|---|
-| test_sessions.py | ConversationSession, SessionStorage, lifecycle |
-| test_llm_cli.py | Модели, режимы, execute_mode, chat-функции |
-| test_model_parameters.py | Параметры моделей |
-| test_temperature.py | Диапазоны температуры |
+**API endpoint:** `https://foundation-models.api.cloud.ru/v1`
 
 ---
 
@@ -146,63 +41,250 @@ pytest test_llm_cli.py -v       # CLI функции
 
 ```
 tinyAI/
-├── llm_cli.py                  # Главный CLI
-├── requirements.txt
-├── pytest.ini
 │
-├── news_agent/
-│   ├── __init__.py             # Пакет v2.0.0
-│   ├── session_manager.py      # ConversationSession + SessionStorage
+├── journalist_agent/           # Task 15 — FSM-агент журналиста
+│   ├── __init__.py
+│   ├── fsm_agent.py            # JournalistFSMAgent: streaming, logging, retry
+│   ├── workflow.py             # ContentType, FSM-состояния, переходы, guards
+│   ├── step_prompts.py         # Промпты для каждого шага каждого типа контента
+│   ├── invariants.py           # Инварианты и pre-check перед выполнением
+│   ├── invariants.json         # Правила инвариантов (JSON)
+│   └── agent.py                # Старый агент (без FSM, совместимость)
+│
+├── news_agent/                 # Tasks 3–9 — новостной агент
 │   ├── pipeline.py             # 5-шаговый NewsPipeline
-│   ├── agent.py                # ReAct AgentLoop
+│   ├── agent.py                # ReAct AgentLoop с function calling
+│   ├── session_manager.py      # ConversationSession + SessionStorage
 │   ├── storage.py              # PostStorage
-│   ├── formatter.py            # OutputFormatter
+│   ├── formatter.py            # OutputFormatter (md/html/telegram/json)
 │   ├── roles.py                # Системные промпты
 │   └── tools.py                # Инструменты агента
 │
-├── test_sessions.py            # Тесты session manager
-├── test_llm_cli.py             # Тесты CLI
-├── test_model_parameters.py
-├── test_temperature.py
+├── memory_agent/               # Task 11 — агент с памятью
 │
-├── sessions/                   # Диалоговые сессии (не в VCS)
-├── posts/                      # Сгенерированные посты (не в VCS)
-├── logs/                       # Логи (не в VCS)
+├── run_3topics.py              # Демо: 3 темы × FSM-агент, streaming, Tee-логи
+├── run_journalist_fsm.py       # Демо: одна задача с LLM
+├── run_journalist_interactive.py  # Интерактивный REPL для FSM
+├── run_journalist_agent.py     # Демо без FSM
+├── run_memory_agent.py         # Демо memory agent
+├── llm_cli.py                  # Главный CLI (tasks 2–9)
 │
-├── README.md
-├── TASK7_README.md             # Диалоговые сессии и контекст
-├── TASK6_README.md             # ReAct-агент
-├── TASK3_README.md             # News pipeline
-├── TASK2_README.md             # Режимы и форматирование
+├── test_journalist_fsm.py      # Тесты FSM-агента
+├── test_journalist_agent.py    # Тесты базового агента
+├── test_article_fsm.py         # Тесты workflow ARTICLE
+├── test_sessions.py
+├── test_llm_cli.py
+├── test_*.py                   # Остальные тесты
+│
+├── requirements.txt
+├── pytest.ini
+├── .env                        # API-ключи (не в VCS)
+├── .gitignore
+│
+├── README.md                   # Этот файл
+├── ARCHITECTURE.md             # Архитектурная схема v6.0
+├── TASK15_README.md            # День 15: архитектурный анализ
+├── TASK14_README.md            # День 14: FSM-агент журналиста
+├── TASK13_README.md            # День 13: инварианты и guards
+├── TASK12_README.md            # День 12: memory agent
+├── TASK10_PLAN.md              # День 10: план разработки
+├── TASK9_README.md             # День 9: персонализация
+├── TASK8_README.md             # День 8: аналитика и метрики
+├── TASK7_README.md             # День 7: диалоговые сессии
+├── TASK6_README.md             # День 6: ReAct-агент
+├── TASK3_README.md             # День 3: news pipeline
+├── TASK2_README.md             # День 2: режимы форматирования
 ├── MODELS_INFO.md              # Справочник моделей
-└── TEMPERATURE_GUIDE.md        # Руководство по температуре
+├── TEMPERATURE_GUIDE.md        # Влияние температуры
+└── TESTING.md                  # Руководство по тестированию
 ```
+
+**Runtime-директории (не в VCS, в `.gitignore`):**
+```
+journalist_tasks_demo/   # JSON-состояния задач + run_*.log
+sessions/                # диалоговые сессии
+posts/                   # сгенерированные посты
+memory_data/             # долгосрочная память агента
+tasks/                   # задачи memory agent
+logs/                    # общие логи
+```
+
+---
+
+## Task 15 — JournalistFSMAgent
+
+Главная фича проекта: FSM-агент, который проводит журналистский материал через строго контролируемые этапы.
+
+### Типы контента и их шаги
+
+| Тип | Шаги FSM |
+|---|---|
+| `ARTICLE` | planning → research → drafting → editing → validation → published |
+| `NEWS_RESEARCH` | brief → search → analysis → fact_check → published |
+| `REVIEW` | criteria → immersion → draft_review → scoring → published |
+| `NOTE` | idea_capture → drafting → published |
+
+### Защиты FSM
+
+- **Guards** — нельзя пропустить шаг (planning → drafting запрещён)
+- **Пауза** — при ошибке API задача переходит в `paused`, сохраняет состояние
+- **Resume** — задача продолжается с того шага, где остановилась
+- **Инварианты** — pre-check перед выполнением (тематические ограничения)
+
+### Запуск демо
+
+```bash
+# Все три темы последовательно (streaming + автолог)
+python3 -u run_3topics.py \
+  --model zai-org/GLM-4.7 \
+  --max-tokens 4000 \
+  --storage-dir journalist_tasks_demo
+
+# Только задача 1 (техника — ARTICLE)
+python3 -u run_3topics.py --task 1 --max-tokens 4000
+
+# Задача 2 (финансы — NEWS_RESEARCH)
+python3 -u run_3topics.py --task 2 --max-tokens 4000
+
+# Задача 3 (искусство — REVIEW)
+python3 -u run_3topics.py --task 3 --max-tokens 4000
+
+# Без записи лога в файл
+python3 -u run_3topics.py --task 1 --no-log
+```
+
+### Аргументы run_3topics.py
+
+| Аргумент | По умолчанию | Описание |
+|---|---|---|
+| `--model` | `zai-org/GLM-4.7` | LLM-модель |
+| `--max-tokens` | `2500` | Макс. токенов на шаг |
+| `--task` | все | Запустить только задачу 1/2/3 |
+| `--storage-dir` | `journalist_tasks_demo` | Директория хранилища |
+| `--no-log` | — | Не писать лог в файл |
+
+### Streaming-вывод в реальном времени
+
+Каждый вызов LLM печатает токены немедленно по мере генерации:
+
+```
+▼▼▼▼▼ 📤 ПРОМПТ → LLM  [Планирование] ▼▼▼▼▼
+  [SYSTEM] Ты — профессиональный журналист...
+  [USER PROMPT]  Составь детальный план статьи...
+▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+
+▲▲▲▲▲ 📥 ОТВЕТ LLM  [Планирование]  (streaming) ▲▲▲▲▲
+  💭 REASONING:                         ← цепочка рассуждений (live)
+  ─────────────────────────────────────
+  1. Analyze the Request: topic is...   ← токены идут сразу
+  2. Drafting sections...
+  ─────────────────────────────────────
+  📝 CONTENT:                           ← финальный ответ (live)
+  {"title": "...", "sections": [...]}
+  🔢 Токены: prompt=271  completion=1939  total=2210
+▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+```
+
+### Логи
+
+Каждый запуск автоматически создаёт лог-файл:
+```
+journalist_tasks_demo/run_task1_20260403_210342.log
+journalist_tasks_demo/run_all_20260403_215900.log
+```
+
+Лог содержит **весь** вывод: промпты, reasoning-цепочки, content, токены.
+
+```bash
+# Просмотр последнего лога
+ls -t journalist_tasks_demo/*.log | head -1 | xargs cat | less
+
+# Только токены по шагам
+ls -t journalist_tasks_demo/*.log | head -1 | xargs grep "Токены:"
+
+# Длины reasoning-цепочек
+ls -t journalist_tasks_demo/*.log | head -1 | xargs grep "reasoning:"
+```
+
+---
+
+## Tasks 2–9 — News Agent CLI
+
+```bash
+python3 llm_cli.py
+```
+
+```
+news-agent> generate Взлёт SpaceX Starship
+news-agent> generate -t analysis Влияние ИИ на рынок труда
+news-agent> agent Создай пост о GPT-5
+news-agent> batch topics.txt
+news-agent> chat                      # новая диалоговая сессия
+news-agent> chat list                 # список сессий
+news-agent> models                    # доступные модели
+```
+
+**Типы постов:** `breaking` · `analysis` · `digest` · `social` · `press`
+
+---
+
+## Тестирование
+
+```bash
+# Все тесты
+pytest -v
+
+# Только FSM-агент
+pytest test_journalist_fsm.py test_article_fsm.py -v
+
+# Только news agent
+pytest test_sessions.py test_llm_cli.py -v
+
+# С выводом print
+pytest -v -s test_journalist_fsm.py
+```
+
+| Файл | Что проверяет |
+|---|---|
+| `test_journalist_fsm.py` | JournalistFSMAgent: start, advance, pause, resume, guards |
+| `test_article_fsm.py` | ARTICLE workflow, переходы, ошибки |
+| `test_journalist_agent.py` | Базовый агент (без FSM) |
+| `test_sessions.py` | ConversationSession, SessionStorage |
+| `test_llm_cli.py` | CLI-функции, модели |
+| `test_analytics.py` | Аналитика и метрики |
+| `test_context_strategies.py` | Стратегии управления контекстом |
+| `test_token_counter.py` | Подсчёт токенов |
+
+---
+
+## Конфигурация `.env`
+
+```env
+CLOUD_API_KEY=ваш-ключ-cloud-ru
+CLOUD_BASE_URL=https://foundation-models.api.cloud.ru/v1
+
+# Опционально (для GPT-моделей)
+OPENAI_API_KEY=sk-proj-...
+```
+
+Получить ключ Cloud.ru: [cloud.ru → Foundation Models](https://cloud.ru/ru/services/foundation-models)
 
 ---
 
 ## Решение проблем
 
-**command not found: python3** — установите Python: `brew install python`
+**`CLOUD_API_KEY not found`** — создайте файл `.env` с ключом
 
-**CLOUD_API_KEY not found** — убедитесь что .env существует и содержит ключ
+**`AuthenticationError`** — проверьте ключ и баланс
 
-**AuthenticationError** — проверьте ключ и баланс у провайдера
+**Пустой `content` при ответе GLM-4.7** — увеличьте `--max-tokens` до 4000+.
+GLM-4.7 использует большую часть токенов на reasoning перед генерацией ответа.
 
-**TypeError: proxies** — `python3 -m pip install -r requirements.txt --force-reinstall`
+**Долгое ожидание (60–90 сек)** — это норма для GLM-4.7 со streaming.
+Reasoning-цепочка генерируется первой и печатается токен за токеном.
 
----
-
-## Документация заданий
-
-| Файл | Тема |
-|---|---|
-| TASK7_README.md | Диалоговые сессии, API vs веб-чат, контекстное окно |
-| TASK6_README.md | ReAct-агент, function calling, инструменты |
-| TASK3_README.md | News pipeline, 5 ролей, SEO |
-| TASK2_README.md | Режимы форматирования, метапромптинг |
-| MODELS_INFO.md | Сравнение моделей и цен |
-| TEMPERATURE_GUIDE.md | Влияние температуры на качество |
+**`TypeError: proxies`** — `pip install -r requirements.txt --force-reinstall`
 
 ---
 
-> **Важно:** Никогда не коммитьте .env с API ключами в git!
+> ⚠️ **Никогда не коммитьте `.env` с API-ключами в git!**
