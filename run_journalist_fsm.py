@@ -123,7 +123,7 @@ def demo_with_llm(
 
     client = OpenAI(
         api_key=os.getenv("CLOUD_API_KEY"),
-        base_url=os.getenv("CLOUD_BASE_URL", "https://api.cloud.ru/v1"),
+        base_url=os.getenv("CLOUD_BASE_URL") or "https://foundation-models.api.cloud.ru/v1",
     )
 
     agent = JournalistFSMAgent(
