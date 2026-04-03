@@ -276,11 +276,11 @@ class ToolDispatcher:
     def _check_duplicate(self, topic: str, threshold: float = 0.7) -> Dict[str, Any]:
         if not self._storage:
             return {"duplicates": [], "is_duplicate": False}
-        duplicates = self._storage.search_similar(topic, threshold=threshold)
+        duplicates = self._storage.find_by_keywords(topic, min_overlap=threshold)
         return {
             "is_duplicate": len(duplicates) > 0,
             "duplicates": [
-                {"id": p["id"], "title": p["title"], "similarity": p.get("similarity", 0)}
+                {"id": p["id"], "title": p["title"], "overlap_score": p.get("overlap_score", 0)}
                 for p in duplicates
             ],
         }

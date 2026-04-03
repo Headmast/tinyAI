@@ -5,6 +5,7 @@ PostStorage — хранилище сгенерированных новостн
 """
 
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -37,8 +38,10 @@ class PostStorage:
             return json.load(f)
 
     def _write_index(self, index: List[Dict[str, Any]]) -> None:
-        with open(self.index_file, "w", encoding="utf-8") as f:
+        tmp = self.index_file.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(index, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.index_file)
 
     def save(self, post_data: Dict[str, Any]) -> str:
         """
@@ -104,12 +107,17 @@ class PostStorage:
             index = [p for p in index if p.get("post_type") == post_type]
         return index[:n]
 
-    def search_similar(
-        self, topic: str, threshold: float = 0.7
+    def find_by_keywords(
+        self, topic: str, min_overlap: float = 0.3
     ) -> List[Dict[str, Any]]:
         """
-        Простой поиск похожих постов по пересечению ключевых слов.
+        Поиск постов по пересечению ключевых слов (Jaccard similarity).
+        Не является семантическим поиском — сравниваются слова заголовков.
         В production можно заменить на векторный поиск.
+
+        Args:
+            topic:       строка поискового запроса
+            min_overlap: минимальный коэффициент пересечения слов (0–1)
         """
         topic_words = set(topic.lower().split())
         stop_words = {"в", "на", "с", "по", "о", "из", "и", "а", "но", "или", "что", "как"}
@@ -126,12 +134,18 @@ class PostStorage:
             if not title_words:
                 continue
             overlap = len(topic_words & title_words)
-            similarity = overlap / max(len(topic_words), len(title_words))
-            if similarity >= threshold:
-                results.append({**entry, "similarity": round(similarity, 2)})
+            score = overlap / max(len(topic_words), len(title_words))
+            if score >= min_overlap:
+                results.append({**entry, "overlap_score": round(score, 2)})
 
-        results.sort(key=lambda x: x["similarity"], reverse=True)
+        results.sort(key=lambda x: x["overlap_score"], reverse=True)
         return results
+
+    def search_similar(
+        self, topic: str, threshold: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """Устаревший алиас для find_by_keywords(). Используйте find_by_keywords()."""
+        return self.find_by_keywords(topic, min_overlap=threshold)
 
     def delete(self, post_id: str) -> bool:
         """Удаляет пост из хранилища."""
