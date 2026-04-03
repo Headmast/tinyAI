@@ -14,10 +14,15 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 from news_agent.token_counter import TokenCounter
+
+_log = logging.getLogger(__name__)
+
+_MODELS_NO_TEMPERATURE: frozenset = frozenset({"gpt-5-nano", "o1", "o3", "o3-mini", "o4-mini"})
 
 
 # ─────────────────────────────────────────────────────────────
@@ -235,7 +240,7 @@ class StickyFactsStrategy(ContextStrategy):
             "max_completion_tokens": 500,
             "temperature": 0.1,
         }
-        if "gpt-5-nano" in model:
+        if model in _MODELS_NO_TEMPERATURE:
             del params["temperature"]
 
         try:
@@ -256,8 +261,8 @@ class StickyFactsStrategy(ContextStrategy):
                     for k in keys[:-self.max_facts]:
                         del self.facts[k]
                 self._facts_update_count += 1
-        except Exception:
-            pass  # Молча продолжаем — факты не обновятся, но диалог не ломается
+        except Exception as exc:
+            _log.warning("StickyFacts: fact extraction failed: %s", exc)
 
     def _format_facts(self) -> str:
         """Форматирует факты для системного сообщения."""
