@@ -86,6 +86,7 @@ class JournalistAgent:
         verbose: bool = True,
         max_completion_tokens: int = 3000,
         temperature: float = 0.6,
+        max_history: int = 20,
     ) -> None:
         self.client = client
         self.model = model
@@ -93,6 +94,7 @@ class JournalistAgent:
         self.verbose = verbose
         self.max_completion_tokens = max_completion_tokens
         self.temperature = temperature
+        self.max_history = max_history
         self._history: List[Dict[str, str]] = []
         self._total_tokens: Dict[str, int] = {
             "prompt_tokens": 0,
@@ -139,6 +141,7 @@ class JournalistAgent:
 
         self._history.append({"role": "user", "content": user_input})
         self._history.append({"role": "assistant", "content": visible_text})
+        self._trim_history()
 
         if llm_violation.violated:
             if self.verbose:
@@ -159,6 +162,12 @@ class JournalistAgent:
             violation=ViolationResult.ok(),
             tokens=self._snapshot_tokens(raw_response),
         )
+
+    def _trim_history(self) -> None:
+        """Обрезает историю до max_history пар (user + assistant)."""
+        max_msgs = self.max_history * 2
+        if len(self._history) > max_msgs:
+            self._history = self._history[-max_msgs:]
 
     def reset_dialog(self) -> None:
         """Сбрасывает историю диалога (инварианты сохраняются)."""
