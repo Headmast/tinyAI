@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from news_agent.token_counter import TokenCounter
+from news_agent.token_counter import TokenCounter, MODELS_NO_TEMPERATURE
 
 
 # ─────────────────────────────────────────────────────────────
@@ -51,7 +51,6 @@ DEFAULT_SUMMARIZE_EVERY = 10
 DEFAULT_KEEP_LAST_N = 6
 DEFAULT_SUMMARY_MAX_TOKENS = 600
 
-_MODELS_NO_TEMPERATURE: frozenset = frozenset({"gpt-5-nano", "o1", "o3", "o3-mini", "o4-mini"})
 
 
 # ─────────────────────────────────────────────────────────────
@@ -375,7 +374,7 @@ class ContextCompressor:
             "max_completion_tokens": DEFAULT_SUMMARY_MAX_TOKENS,
             "temperature": 0.3,
         }
-        if self.model in _MODELS_NO_TEMPERATURE:
+        if self.model in MODELS_NO_TEMPERATURE:
             del params["temperature"]
 
         response = client.chat.completions.create(**params)

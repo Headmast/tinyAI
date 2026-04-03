@@ -18,11 +18,9 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-from news_agent.token_counter import TokenCounter
+from news_agent.token_counter import TokenCounter, MODELS_NO_TEMPERATURE
 
 _log = logging.getLogger(__name__)
-
-_MODELS_NO_TEMPERATURE: frozenset = frozenset({"gpt-5-nano", "o1", "o3", "o3-mini", "o4-mini"})
 
 
 # ─────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ from openai import OpenAI
 
 from news_agent.roles import get_role
 from news_agent.tools import TOOL_DEFINITIONS, ToolDispatcher
-from news_agent.token_counter import TokenCounter, TokenBudget
+from news_agent.token_counter import TokenCounter, TokenBudget, MODELS_NO_TEMPERATURE
 from news_agent.usage_tracker import UsageTracker
 
 
@@ -220,7 +220,7 @@ class AgentLoop:
             "temperature": 0.5,
         }
 
-        if "gpt-5-nano" in self.model:
+        if self.model in MODELS_NO_TEMPERATURE:
             del params["temperature"]
 
         for attempt in range(3):

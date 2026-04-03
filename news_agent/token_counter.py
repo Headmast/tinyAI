@@ -39,6 +39,10 @@ _MODEL_ENCODING_MAP: Dict[str, str] = {
     "zai-org/GLM-4.7":       "cl100k_base",
 }
 
+MODELS_NO_TEMPERATURE: frozenset = frozenset({
+    "gpt-5-nano", "o1", "o1-mini", "o3", "o3-mini", "o4-mini",
+})
+
 _TOKENS_PER_MESSAGE = 4
 _TOKENS_PER_REPLY_PRIMER = 3
 
