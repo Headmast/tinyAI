@@ -11,9 +11,10 @@ MemoryManager координирует все три слоя и предост�
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ShortTermMemory:
@@ -57,8 +58,8 @@ class ShortTermMemory:
 
     def _trim(self) -> None:
         """Удаляет самые старые сообщения, если превышен лимит."""
-        while len(self.messages) > self.max_messages:
-            self.messages.pop(0)
+        if len(self.messages) > self.max_messages:
+            self.messages = self.messages[-self.max_messages:]
 
     @property
     def message_count(self) -> int:
@@ -169,8 +170,15 @@ class LongTermMemory:
       - knowledge: накопленные знания и факты
     """
 
-    def __init__(self, storage_path: str = "memory_data/long_term.json") -> None:
+    def __init__(
+        self,
+        storage_path: str = "memory_data/long_term.json",
+        max_decisions: int = 100,
+        max_knowledge: int = 200,
+    ) -> None:
         self._path = Path(storage_path)
+        self.max_decisions = max_decisions
+        self.max_knowledge = max_knowledge
         self._data: Dict[str, Any] = {
             "profile": {},
             "decisions": [],
@@ -191,8 +199,10 @@ class LongTermMemory:
     def _save(self) -> None:
         self._data["updated_at"] = datetime.now().isoformat()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
+        tmp = self._path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self._path)
 
     # --- profile ---
 
@@ -214,6 +224,8 @@ class LongTermMemory:
             "reasoning": reasoning,
             "timestamp": datetime.now().isoformat(),
         })
+        if len(self._data["decisions"]) > self.max_decisions:
+            self._data["decisions"] = self._data["decisions"][-self.max_decisions:]
         self._save()
 
     def get_decisions(self, last_n: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -231,6 +243,8 @@ class LongTermMemory:
             "source": source,
             "timestamp": datetime.now().isoformat(),
         })
+        if len(self._data["knowledge"]) > self.max_knowledge:
+            self._data["knowledge"] = self._data["knowledge"][-self.max_knowledge:]
         self._save()
 
     def search_knowledge(self, query: str) -> List[Dict[str, Any]]:
@@ -349,3 +363,69 @@ class MemoryManager:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+# ─────────────────────────────────────────────────────────────
+# Общие утилиты для работы с memory-блоками LLM
+# ─────────────────────────────────────────────────────────────
+
+_MEMORY_BLOCK_PATTERN = re.compile(
+    r"```memory\s*\n(\{.*?\})\s*\n```",
+    re.DOTALL,
+)
+
+
+def extract_memory_block(raw_text: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    Извлекает блок ```memory из ответа LLM.
+
+    Returns:
+        (visible_text, memory_dict)  — memory_dict равен None, если блок не найден
+        или содержит невалидный JSON.
+    """
+    match = _MEMORY_BLOCK_PATTERN.search(raw_text)
+    if not match:
+        return raw_text.strip(), None
+    try:
+        memory_data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return raw_text.strip(), None
+    visible = _MEMORY_BLOCK_PATTERN.sub("", raw_text).strip()
+    return visible, memory_data
+
+
+def apply_memory_updates(manager: "MemoryManager", data: Dict[str, Any]) -> None:
+    """
+    Применяет обновления из распарсенного memory-блока к MemoryManager.
+
+    Обновляет:
+      - рабочую память (факты, цели, контекст)
+      - долговременную память (профиль, решения, знания)
+    """
+    working = data.get("working", {})
+    if working:
+        facts = working.get("facts", [])
+        if facts:
+            manager.working.add_facts(facts)
+        goals = working.get("goals", [])
+        if goals:
+            manager.working.goals.extend(goals)
+        for k, v in working.get("context", {}).items():
+            manager.working.set_context(k, v)
+
+    lt = data.get("long_term", {})
+    if lt:
+        for k, v in lt.get("profile", {}).items():
+            manager.long_term.set_profile(k, v)
+        for d in lt.get("decisions", []):
+            if isinstance(d, dict):
+                manager.long_term.add_decision(
+                    d.get("decision", ""), d.get("reasoning", "")
+                )
+            elif isinstance(d, str):
+                manager.long_term.add_decision(d)
+        for k in lt.get("knowledge", []):
+            if isinstance(k, dict):
+                manager.long_term.add_knowledge(
+                    k.get("topic", ""), k.get("content", ""), k.get("source", "")
+                )

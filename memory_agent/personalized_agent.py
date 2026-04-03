@@ -8,14 +8,12 @@ PersonalizedAgent — диалоговый агент с персонализа�
   - Поддерживает горячую смену профиля без потери контекста
 """
 
-import json
-import re
 import time
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
-from memory_agent.memory import MemoryManager
+from memory_agent.memory import MemoryManager, extract_memory_block, apply_memory_updates
 from memory_agent.profile import UserProfile, ProfileManager, BUILTIN_PROFILES
 
 
@@ -57,12 +55,6 @@ PERSONALIZED_SYSTEM_PROMPT = """Ты — интеллектуальный асс
 - В knowledge: факты, полезные данные
 - Активно используй данные из долговременной памяти в ответах
 - ВСЕГДА соблюдай стиль и формат из профиля пользователя"""
-
-
-MEMORY_BLOCK_PATTERN = re.compile(
-    r"```memory\s*\n(\{.*?\})\s*\n```",
-    re.DOTALL,
-)
 
 
 class PersonalizedAgent:
@@ -166,10 +158,10 @@ class PersonalizedAgent:
 
         self._update_token_usage(response)
 
-        visible_text, memory_data = self._extract_memory_block(raw_content)
+        visible_text, memory_data = extract_memory_block(raw_content)
 
         if memory_data:
-            self._apply_memory_updates(memory_data)
+            apply_memory_updates(self.memory, memory_data)
 
         self.memory.short_term.add_message("assistant", visible_text)
 
@@ -238,62 +230,6 @@ class PersonalizedAgent:
                     time.sleep(2)
                 else:
                     raise
-
-    def _extract_memory_block(self, raw_text: str) -> tuple:
-        """
-        Извлекает блок ```memory из ответа.
-        Возвращает (видимый_текст, memory_dict или None).
-        """
-        match = MEMORY_BLOCK_PATTERN.search(raw_text)
-        if not match:
-            return raw_text.strip(), None
-
-        try:
-            memory_data = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            return raw_text.strip(), None
-
-        visible = MEMORY_BLOCK_PATTERN.sub("", raw_text).strip()
-        return visible, memory_data
-
-    def _apply_memory_updates(self, data: Dict[str, Any]) -> None:
-        """Применяет обновления памяти из блока memory."""
-        working = data.get("working", {})
-        if working:
-            facts = working.get("facts", [])
-            if facts:
-                self.memory.working.add_facts(facts)
-            goals = working.get("goals", [])
-            if goals:
-                self.memory.working.goals.extend(goals)
-            context = working.get("context", {})
-            for k, v in context.items():
-                self.memory.working.set_context(k, v)
-
-        lt = data.get("long_term", {})
-        if lt:
-            profile = lt.get("profile", {})
-            for k, v in profile.items():
-                self.memory.long_term.set_profile(k, v)
-
-            decisions = lt.get("decisions", [])
-            for d in decisions:
-                if isinstance(d, dict):
-                    self.memory.long_term.add_decision(
-                        d.get("decision", ""),
-                        d.get("reasoning", ""),
-                    )
-                elif isinstance(d, str):
-                    self.memory.long_term.add_decision(d)
-
-            knowledge = lt.get("knowledge", [])
-            for k in knowledge:
-                if isinstance(k, dict):
-                    self.memory.long_term.add_knowledge(
-                        k.get("topic", ""),
-                        k.get("content", ""),
-                        k.get("source", ""),
-                    )
 
     def _update_token_usage(self, response: Any) -> None:
         usage = getattr(response, "usage", None)
