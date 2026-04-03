@@ -13,6 +13,7 @@
   - показывает время каждого шага
 """
 
+import datetime
 import os
 import sys
 import time
@@ -27,6 +28,35 @@ from journalist_agent.workflow import (
 from journalist_agent.fsm_agent import JournalistFSMAgent
 
 load_dotenv()
+
+
+class Tee:
+    """Дублирует весь stdout одновременно в терминал и в log-файл."""
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, text: str) -> None:
+        for s in self._streams:
+            try:
+                s.write(text)
+                s.flush()
+            except Exception:
+                pass
+
+    def flush(self) -> None:
+        for s in self._streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+    def fileno(self):
+        return self._streams[0].fileno()
+
+    def isatty(self):
+        return getattr(self._streams[0], "isatty", lambda: False)()
+
 
 TASKS = [
     {
@@ -253,7 +283,19 @@ def main() -> None:
     p.add_argument("--task", type=int, choices=[1, 2, 3],
                    help="Запустить только одну задачу")
     p.add_argument("--storage-dir", default="journalist_tasks_demo")
+    p.add_argument("--no-log", action="store_true",
+                   help="Не записывать лог в файл")
     args = p.parse_args()
+
+    os.makedirs(args.storage_dir, exist_ok=True)
+    log_file = None
+    if not args.no_log:
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        task_tag = f"_task{args.task}" if args.task else "_all"
+        log_path = os.path.join(args.storage_dir, f"run{task_tag}_{ts}.log")
+        log_file = open(log_path, "w", encoding="utf-8")
+        sys.stdout = Tee(sys.__stdout__, log_file)
+        print(f"  📝 Лог записывается в: {log_path}", flush=True)
 
     client = OpenAI(
         api_key=os.getenv("CLOUD_API_KEY"),
@@ -289,6 +331,11 @@ def main() -> None:
     print(f"  Всего задач в хранилище: {len(all_tasks)}")
     for t in all_tasks[:5]:
         print(f"    {t['task_id']}  {t['content_type']:<15s}  {t['state']:<20s}  {t['topic'][:40]}")
+
+    if log_file is not None:
+        sys.stdout = sys.__stdout__
+        log_file.close()
+        print(f"  📝 Лог сохранён: {log_path}")
 
 
 if __name__ == "__main__":
