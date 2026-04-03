@@ -424,8 +424,8 @@ class JournalistFSMAgent:
         user_prompt: str,
     ) -> None:
         """Выводит промпт отправленный в LLM."""
-        print(f"\n{'▼' * 65}")
-        print(f"  📤 ПРОМПТ → LLM  [{step.label}]")
+        print(f"\n{'▼' * 65}", flush=True)
+        print(f"  📤 ПРОМПТ → LLM  [{step.label}]", flush=True)
         print(f"{'▼' * 65}")
         print(f"  [SYSTEM] (первые 200 симв.)")
         print(f"  {system_prompt[:200].replace(chr(10), ' ')}...")
@@ -433,7 +433,7 @@ class JournalistFSMAgent:
         print(f"  [USER PROMPT]")
         for line in user_prompt.split("\n"):
             print(f"  {line}")
-        print(f"{'▼' * 65}")
+        print(f"{'▼' * 65}", flush=True)
 
     def _print_llm_response(
         self,
@@ -452,26 +452,26 @@ class JournalistFSMAgent:
                 f"total={usage.total_tokens}"
             )
 
-        print(f"\n{'▲' * 65}")
-        print(f"  📥 ОТВЕТ LLM  [{step.label}]")
+        print(f"\n{'▲' * 65}", flush=True)
+        print(f"  📥 ОТВЕТ LLM  [{step.label}]", flush=True)
         if tokens_info:
-            print(f"  🔢 Токены: {tokens_info}")
+            print(f"  🔢 Токены: {tokens_info}", flush=True)
         print(f"{'▲' * 65}")
 
         if reasoning:
-            print(f"  💭 REASONING CHAIN ({len(reasoning)} симв.):")
+            print(f"  💭 REASONING CHAIN ({len(reasoning)} симв.):", flush=True)
             print(f"  {'─' * 63}")
             for line in reasoning.split("\n"):
                 print(f"  {line}")
-            print(f"  {'─' * 63}")
+            print(f"  {'─' * 63}", flush=True)
         else:
-            print(f"  💭 reasoning: (пусто)")
+            print(f"  💭 reasoning: (пусто)", flush=True)
 
-        print(f"  📝 CONTENT ({len(content)} симв.):")
+        print(f"  📝 CONTENT ({len(content)} симв.):", flush=True)
         print(f"  {'─' * 63}")
         for line in (content or "(пусто)").split("\n"):
             print(f"  {line}")
-        print(f"{'▲' * 65}")
+        print(f"{'▲' * 65}", flush=True)
 
     def _print_header(self, task: JournalistTask, is_new: bool = True) -> None:
         if not self.verbose:
