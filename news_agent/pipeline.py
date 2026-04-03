@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 from openai import OpenAI
 
 from news_agent.roles import ROLES, POST_TYPE_GUIDES, get_role
+from news_agent.token_counter import TokenCounter
 
 
 class PipelineError(Exception):
@@ -42,6 +43,7 @@ class NewsPipeline:
             "completion_tokens": 0,
             "total_tokens": 0,
         }
+        self._counter = TokenCounter(model=model)
 
     def run(
         self,
@@ -279,12 +281,16 @@ class NewsPipeline:
         text = text.strip()
 
         if "```json" in text:
-            start = text.index("```json") + 7
-            end = text.index("```", start)
+            start = text.find("```json") + 7
+            end = text.find("```", start)
+            if end == -1:
+                end = len(text)
             text = text[start:end].strip()
         elif "```" in text:
-            start = text.index("```") + 3
-            end = text.index("```", start)
+            start = text.find("```") + 3
+            end = text.find("```", start)
+            if end == -1:
+                end = len(text)
             text = text[start:end].strip()
 
         if not text.startswith("{"):
@@ -301,11 +307,17 @@ class NewsPipeline:
             return {"raw_response": text, "parse_error": True}
 
     def _update_token_estimate(self, content: str, reasoning: str, prompt: str) -> None:
-        estimated_prompt = len(prompt) // 4
-        estimated_completion = (len(content) + len(reasoning)) // 4
-        self._token_usage["prompt_tokens"] += estimated_prompt
-        self._token_usage["completion_tokens"] += estimated_completion
-        self._token_usage["total_tokens"] += estimated_prompt + estimated_completion
+        msgs = [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": content + reasoning},
+        ]
+        data = self._counter.count_messages(msgs)
+        by_role = data.get("by_role", {})
+        prompt_t = by_role.get("user", 0)
+        completion_t = by_role.get("assistant", 0)
+        self._token_usage["prompt_tokens"] += prompt_t
+        self._token_usage["completion_tokens"] += completion_t
+        self._token_usage["total_tokens"] += prompt_t + completion_t
 
     def _print_header(self, topic: str, post_type: Optional[str]) -> None:
         if not self.verbose:
