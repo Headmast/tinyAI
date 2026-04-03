@@ -15,6 +15,7 @@ SessionManager — управление диалоговыми сессиями.
 """
 
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -380,8 +381,10 @@ class SessionStorage:
             return []
 
     def _write_index(self, index: List[Dict[str, Any]]) -> None:
-        with open(self.index_file, "w", encoding="utf-8") as f:
+        tmp = self.index_file.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(index, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.index_file)
 
     def _make_index_entry(self, session: "ConversationSession") -> Dict[str, Any]:
         return {
