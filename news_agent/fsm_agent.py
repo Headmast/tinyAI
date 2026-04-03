@@ -431,12 +431,16 @@ class ArticleFSMAgent:
         """Извлекает JSON из ответа LLM. Поддерживает ```json ... ``` блоки."""
         text = raw.strip()
         if "```json" in text:
-            start = text.index("```json") + 7
-            end = text.index("```", start)
+            start = text.find("```json") + 7
+            end = text.find("```", start)
+            if end == -1:
+                end = len(text)
             text = text[start:end].strip()
         elif "```" in text:
-            start = text.index("```") + 3
-            end = text.index("```", start)
+            start = text.find("```") + 3
+            end = text.find("```", start)
+            if end == -1:
+                end = len(text)
             text = text[start:end].strip()
         try:
             return json.loads(text)

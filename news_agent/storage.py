@@ -34,8 +34,11 @@ class PostStorage:
             self._write_index([])
 
     def _read_index(self) -> List[Dict[str, Any]]:
-        with open(self.index_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(self.index_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError, OSError):
+            return []
 
     def _write_index(self, index: List[Dict[str, Any]]) -> None:
         tmp = self.index_file.with_suffix(".tmp")
