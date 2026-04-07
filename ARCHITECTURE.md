@@ -1,6 +1,6 @@
 # TinyAI — Архитектурная документация
 
-> Версия документа: актуальна для ветки `15task`  
+> Версия документа: v7.0 — Task 16: MCP-интеграция  
 > Проект: учебный фреймворк LLM-агентов (Cloud.ru / OpenAI-совместимый API)
 
 ---
@@ -28,8 +28,9 @@ TinyAI — учебный фреймворк для изучения архит�
 | Модуль | Паттерн | Ключевая идея |
 |--------|---------|---------------|
 | `memory_agent` | Layered Memory | Три слоя памяти с явным управлением маршрутизацией |
-| `news_agent` | Pipeline + ReAct + FSM | Несколько стратегий генерации и управления контекстом |
+| `news_agent` | Pipeline + ReAct + FSM + MCP | Несколько стратегий генерации и MCP-бекэнд для логов/памяти |
 | `journalist_agent` | Invariant Enforcement | Двухуровневая защита от нарушения редакционных правил |
+| `mcp_server` | MCP stdio | JSON-RPC 2.0 бэкенд для логов, памяти, статистики |
 
 **Используемый API:** Cloud.ru Foundation Models (OpenAI-совместимый).  
 **Модели по умолчанию:** `zai-org/GLM-4.7`, `zai-org/GLM-4.7-Flash`.
@@ -49,9 +50,10 @@ tinyAI/
 │   ├── personalized_agent.py   # PersonalizedAgent — агент с профилем пользователя
 │   └── profile.py              # UserProfile, ProfileManager, BUILTIN_PROFILES
 │
-├── news_agent/                 # Агент генерации новостей (v6.0)
+├── news_agent/                 # Агент генерации новостей (v7.0)
 │   ├── __init__.py
 │   ├── agent.py                # AgentLoop — ReAct-агент (автономный режим)
+│   ├── mcp_bridge.py           # MCPBridge — мост к mcp_server.py через stdio
 │   ├── pipeline.py             # NewsPipeline — 5-шаговый конвейер
 │   ├── fsm_agent.py            # ArticleFSMAgent — агент с конечным автоматом
 │   ├── roles.py                # Роли агентов и профили типов постов
@@ -72,6 +74,11 @@ tinyAI/
 │   ├── invariants.py           # Invariant, InvariantStore, ViolationResult
 │   └── invariants.json         # Конфигурация редакционных инвариантов
 │
+├── mcp_server.py               # MCP-сервер (протокол: JSON-RPC 2.0 / stdio)
+│   └── инструменты: list_logs, read_log, search_logs,
+│             list_memory, read_memory, get_usage_stats
+├── mcp_client.py               # MCP-клиент (handshake + вывод инструментов + демо)
+│
 ├── llm_cli.py                  # CLI-точка входа (все команды)
 ├── run_memory_agent.py         # Демо-скрипт: memory_agent
 ├── run_journalist_agent.py     # Демо-скрипт: journalist_agent
@@ -80,6 +87,7 @@ tinyAI/
 ├── test_context_strategies.py  # Тесты стратегий контекста (pytest)
 ├── test_context_compressor.py  # Тесты компрессора (pytest)
 ├── requirements.txt            # Зависимости Python
+├── TASK16_README.md            # Задание 16: MCP-клиент и интеграция
 ├── TASK14_README.md            # Задание 14: journalist_agent
 ├── TASK15_README.md            # Задание 15: анализ и ревью кода
 └── ARCHITECTURE.md             # Этот файл
@@ -327,9 +335,11 @@ class UserProfile:
 run(task) →
   while iteration < max_iterations:
     [1] Проверить бюджет токенов (TokenBudget.check_overflow)
-    [2] Вызов LLM с TOOL_DEFINITIONS
+    [2] Вызов LLM с TOOL_DEFINITIONS (12 инструментов: 6 локальных + 6 MCP)
     [3] Если FINAL_POST: в ответе → завершение
     [4] Если tool_calls → ToolDispatcher.dispatch()
+          ├─ локальный инструмент → обработчик
+          └─ MCP-инструмент → MCPBridge.call_tool() → mcp_server.py
     [5] Добавить observation в messages
     [6] Следующая итерация
 ```
@@ -353,7 +363,9 @@ class AgentLoop:
     #   token_usage, token_history, elapsed_ms
 ```
 
-**Доступные инструменты** (`tools.py`):
+**Доступные инструменты** (`tools.py`), всего 12 шт.:
+
+**Локальные (6):**
 
 | Инструмент | Описание |
 |------------|----------|
@@ -363,6 +375,52 @@ class AgentLoop:
 | `format_post` | Конвертация в Markdown/HTML/Telegram |
 | `get_post_by_id` | Загрузить конкретный пост |
 | `check_duplicate` | Поиск похожих постов (Jaccard similarity) |
+
+**MCP-инструменты (6) — проксируются через `MCPBridge` → `mcp_server.py`:**
+
+| Инструмент | Описание |
+|------------|----------|
+| `list_logs` | Список файлов логов разговоров с метаданными |
+| `read_log` | Содержимое конкретного лога разговора |
+| `search_logs` | Поиск текста по всем логам |
+| `list_memory` | Список файлов долгосрочной памяти агента |
+| `read_memory` | Содержимое файла памяти |
+| `get_usage_stats` | Токены, стоимость, число разговоров |
+
+### 5.1.1 `MCPBridge` — мост к MCP-серверу
+
+`MCPBridge` реализует паттерн **ленивого подключения**: сервер запускается как подпроцесс только при первом вызове инструмента.
+
+```
+ToolDispatcher.dispatch(tool_name, args)
+      │
+      ├─ tool_name in MCP_TOOLS?
+      │     │
+      │     └─ MCPBridge.call_tool(name, args)
+      │           │
+      │           ├─ [1-й раз] Popen(mcp_server.py)
+      │           │            → initialize → notifications/initialized
+      │           │
+      │           └─ request("tools/call", {name, arguments})
+      │                    stdin ─── JSON-RPC 2.0 ──→ stdout
+      │
+      └─ иначе → локальный _handler(**args)
+```
+
+```python
+class MCPBridge:
+    def call_tool(name: str, arguments: dict) -> str
+    # Запускает сервер при необходимости, выполняет MCP-рукопожатие,
+    # вызывает инструмент и возвращает текстовый результат.
+    # Ошибки возвращаются как строки "[MCP] ...", не бросают исключений.
+
+    def close() -> None
+    # Закрывает stdin подпроцесса и ждёт завершения сервера.
+    # Вызывается автоматически в AgentLoop.run() после завершения задачи.
+```
+
+**Протокол:** MCP stdio v2024-11-05, транспорт JSON-RPC 2.0 (одна строка = одно сообщение).  
+**Зависимости:** только stdlib (`subprocess`, `json`, `sys`). Не требует `mcp` пакета.
 
 ### 5.2 `NewsPipeline` — детерминированный конвейер
 

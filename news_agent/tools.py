@@ -6,6 +6,8 @@
 import json
 from typing import Any, Callable, Dict, List, Optional
 
+from news_agent.mcp_bridge import MCPBridge, MCP_TOOLS
+
 
 TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
@@ -163,6 +165,125 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             },
         },
     },
+    # ── MCP-инструменты (проксируются через mcp_bridge → mcp_server) ──────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_logs",
+            "description": (
+                "[MCP] Возвращает список всех файлов логов разговоров с метаданными. "
+                "Используй чтобы узнать, какие логи чатов сохранены в системе."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "Необязательный фильтр по имени файла (подстрока)",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_log",
+            "description": (
+                "[MCP] Читает содержимое конкретного файла лога разговора. "
+                "Возвращает сообщения с временными метками и статистикой токенов."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Имя файла лога (например conversation_20260317_192513.json)",
+                    },
+                    "last_n": {
+                        "type": "integer",
+                        "description": "Вернуть только последние N сообщений",
+                    },
+                },
+                "required": ["filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_logs",
+            "description": (
+                "[MCP] Ищет заданный текст во всех логах разговоров. "
+                "Используй для поиска предыдущих разговоров по теме."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Текст для поиска (без учёта регистра)",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Максимальное число результатов (по умолчанию 10)",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_memory",
+            "description": (
+                "[MCP] Возвращает список файлов долгосрочной памяти агента "
+                "с кратким содержимым каждого."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_memory",
+            "description": (
+                "[MCP] Читает конкретный файл долгосрочной памяти агента. "
+                "Используй для просмотра сохранённого профиля пользователя."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Имя файла памяти (например long_term.json)",
+                    }
+                },
+                "required": ["filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_usage_stats",
+            "description": (
+                "[MCP] Возвращает накопленную статистику использования: "
+                "токены, стоимость, число разговоров."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -172,8 +293,9 @@ class ToolDispatcher:
     Связывает имена функций с их реализациями.
     """
 
-    def __init__(self, storage=None):
+    def __init__(self, storage=None, verbose: bool = False):
         self._storage = storage
+        self._mcp = MCPBridge(verbose=verbose)
         self._handlers: Dict[str, Callable] = {
             "save_post": self._save_post,
             "load_post_history": self._load_post_history,
@@ -183,8 +305,16 @@ class ToolDispatcher:
             "check_duplicate": self._check_duplicate,
         }
 
+    def close(self) -> None:
+        """Закрывает MCP-соединение. Вызывать при завершении работы агента."""
+        self._mcp.close()
+
     def dispatch(self, tool_name: str, arguments: Dict[str, Any]) -> str:
         """Вызывает нужный инструмент и возвращает строковый результат."""
+        # MCP-инструменты проксируются напрямую в MCP-сервер
+        if tool_name in MCP_TOOLS:
+            return self._mcp.call_tool(tool_name, arguments)
+
         handler = self._handlers.get(tool_name)
         if not handler:
             return json.dumps({"error": f"Инструмент '{tool_name}' не найден"}, ensure_ascii=False)

@@ -202,6 +202,7 @@ class AgentLoop:
         }
 
         self._record_to_tracker(result)
+        self.dispatcher.close()     # закрываем MCP-соединение
         return result
 
     def _call_llm(

@@ -1,8 +1,8 @@
-# TinyAI — AI Курс (15 дней)
+# TinyAI — AI Курс (16 дней)
 
-Учебный проект: 15 дней от базового промптинга до продвинутого FSM-агента с reasoning-моделью.
+Учебный проект: 16 дней от базового промптинга до MCP-интеграции с инструментами для управления логами и памятью.
 
-> **Стек:** Python 3.10+ · Cloud.ru Foundation Models API · `zai-org/GLM-4.7` (reasoning) · OpenAI-compatible SDK
+> **Стек:** Python 3.9+ · Cloud.ru Foundation Models API · `zai-org/GLM-4.7` (reasoning) · OpenAI-compatible SDK · MCP (Model Context Protocol)
 
 ---
 
@@ -51,17 +51,20 @@ tinyAI/
 │   ├── invariants.json         # Правила инвариантов (JSON)
 │   └── agent.py                # Старый агент (без FSM, совместимость)
 │
-├── news_agent/                 # Tasks 3–9 — новостной агент
+├── news_agent/                 # Tasks 3–9, 16 — новостной агент
 │   ├── pipeline.py             # 5-шаговый NewsPipeline
 │   ├── agent.py                # ReAct AgentLoop с function calling
 │   ├── session_manager.py      # ConversationSession + SessionStorage
 │   ├── storage.py              # PostStorage
 │   ├── formatter.py            # OutputFormatter (md/html/telegram/json)
 │   ├── roles.py                # Системные промпты
-│   └── tools.py                # Инструменты агента
+│   ├── tools.py                # Инструменты агента (6 локальных + 6 MCP)
+│   └── mcp_bridge.py           # MCP-мост: запускает mcp_server.py как подпроцесс
 │
 ├── memory_agent/               # Task 11 — агент с памятью
 │
+├── mcp_server.py               # MCP-сервер: инструменты для логов и памяти
+├── mcp_client.py               # MCP-клиент: handshake + список инструментов
 ├── run_3topics.py              # Демо: 3 темы × FSM-агент, streaming, Tee-логи
 ├── run_journalist_fsm.py       # Демо: одна задача с LLM
 ├── run_journalist_interactive.py  # Интерактивный REPL для FSM
@@ -82,7 +85,8 @@ tinyAI/
 ├── .gitignore
 │
 ├── README.md                   # Этот файл
-├── ARCHITECTURE.md             # Архитектурная схема v6.0
+├── ARCHITECTURE.md             # Архитектурная схема v7.0
+├── TASK16_README.md            # День 16: MCP-клиент и интеграция
 ├── TASK15_README.md            # День 15: архитектурный анализ
 ├── TASK14_README.md            # День 14: FSM-агент журналиста
 ├── TASK13_README.md            # День 13: инварианты и guards
@@ -107,6 +111,59 @@ posts/                   # сгенерированные посты
 memory_data/             # долгосрочная память агента
 tasks/                   # задачи memory agent
 logs/                    # общие логи
+```
+
+---
+
+## Task 16 — MCP-интеграция
+
+День 16: локальный MCP-сервер управляет логами и памятью, агент подключается к нему как к инструментальному бэкенду.
+
+### Запуск
+
+```bash
+# Запустить MCP-клиент — он сам поднимет сервер и выведет список инструментов
+python3 mcp_client.py
+```
+
+### Что происходит
+
+```
+mcp_client.py
+  → запускает mcp_server.py как подпроцесс
+  → MCP handshake: initialize → notifications/initialized
+  → tools/list → 6 инструментов
+  → tools/call (демо: list_logs, list_memory, get_usage_stats, search_logs)
+```
+
+### Инструменты MCP-сервера
+
+| Инструмент | Описание |
+|-----------|----------|
+| `list_logs` | Список файлов логов разговоров |
+| `read_log` | Содержимое конкретного лога |
+| `search_logs` | Поиск текста по всем логам |
+| `list_memory` | Список файлов долгосрочной памяти |
+| `read_memory` | Содержимое файла памяти |
+| `get_usage_stats` | Токены, стоимость, число разговоров |
+
+### Интеграция в AgentLoop
+
+MCP-инструменты автоматически доступны LLM при вызове `agent` в CLI:
+
+```bash
+python3 llm_cli.py
+news-agent> agent Сделай обзор предыдущих разговоров на тему ИИ
+# Агент сам вызовет search_logs и get_usage_stats через MCP
+```
+
+**Архитектура интеграции:**
+```
+AgentLoop (agent.py)
+  └── ToolDispatcher (tools.py)  ← dispatch(tool_name, args)
+        ├── локальные инструменты: save_post, analyze_topic, ...
+        └── MCP-инструменты: → MCPBridge (mcp_bridge.py)
+                                    └── mcp_server.py (подпроцесс, stdio)
 ```
 
 ---
