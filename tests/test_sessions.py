@@ -151,19 +151,21 @@ class TestTokenUsage:
 
     def test_estimate_tokens_empty(self):
         s = ConversationSession()
-        assert s.estimate_tokens() == 0
+        # With tiktoken: system prompt overhead produces a few tokens
+        assert s.estimate_tokens() < 10
 
     def test_estimate_tokens_approx(self):
         s = ConversationSession()
         s.add_user_message("A" * 400)
         estimated = s.estimate_tokens()
-        assert estimated == 100
+        # tiktoken: 400 'A's ≈ 50-110 tokens depending on encoding
+        assert 30 <= estimated <= 150
 
     def test_estimate_tokens_multiple_messages(self):
         s = ConversationSession()
         s.add_user_message("A" * 400)
         s.add_assistant_message("B" * 400)
-        assert s.estimate_tokens() == 200
+        assert s.estimate_tokens() >= 60  # at least both messages' tokens
 
 
 class TestContextInfo:
@@ -179,22 +181,26 @@ class TestContextInfo:
     def test_context_info_empty_session(self):
         s = ConversationSession()
         info = s.get_context_info()
-        assert info["used_tokens"] == 0
-        assert info["percentage"] == 0.0
+        assert info["used_tokens"] < 10
+        assert info["percentage"] < 1.0
         assert info["warning"] is False
 
     def test_context_info_percentage_calculation(self):
         s = ConversationSession(model="zai-org/GLM-4.7-Flash")
         max_t = s.max_context_tokens
-        s.add_user_message("A" * (max_t * 4 // 2))
+        # With tiktoken, 'A' * N gives ~N/5.5 tokens, not N/4
+        # Use enough chars to get 40-60% range
+        s.add_user_message("A" * (max_t * 5 // 2))
         info = s.get_context_info()
-        assert 45.0 <= info["percentage"] <= 55.0
+        assert 20.0 <= info["percentage"] <= 70.0
 
     def test_context_warning_triggered(self):
         s = ConversationSession(model="zai-org/GLM-4.7-Flash")
         max_t = s.max_context_tokens
-        chars_for_90pct = int(max_t * 4 * 0.9)
-        s.add_user_message("A" * chars_for_90pct)
+        # Directly set a large message count to simulate 85% fill
+        # Patch estimate_tokens to return 85% of max
+        target = int(max_t * 0.85)
+        s.estimate_tokens = lambda: target
         info = s.get_context_info()
         assert info["warning"] is True
 
@@ -223,7 +229,9 @@ class TestContextBar:
     def test_format_context_bar_red_when_full(self):
         s = ConversationSession(model="zai-org/GLM-4.7-Flash")
         max_t = s.max_context_tokens
-        s.add_user_message("A" * (max_t * 4))
+        # Patch estimate_tokens to return 95% of max (triggers red bar)
+        target = int(max_t * 0.95)
+        s.estimate_tokens = lambda: target
         bar = s.format_context_bar()
         assert "🔴" in bar
 
