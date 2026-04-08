@@ -25,8 +25,8 @@ from memory_agent.profile import (
 from memory_agent.personalized_agent import (
     PersonalizedAgent,
     PERSONALIZED_SYSTEM_PROMPT,
-    MEMORY_BLOCK_PATTERN,
 )
+from memory_agent.agent import MEMORY_BLOCK_PATTERN
 
 
 # ─────────────────────────────────────────────────────────────

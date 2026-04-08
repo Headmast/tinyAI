@@ -1,7 +1,8 @@
 """Quick test: verify MCP server tools work end-to-end."""
 import subprocess, sys, json, re, os
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(PROJECT_ROOT)
 
 proc = subprocess.Popen(
     [sys.executable, "mcp_server.py"],
@@ -88,7 +89,7 @@ proc.wait(timeout=3)
 
 # Cleanup test file
 import pathlib
-test_file = pathlib.Path(__file__).parent / "memory_data" / "test_day17.json"
+test_file = pathlib.Path(PROJECT_ROOT) / "memory_data" / "test_day17.json"
 if test_file.exists():
     test_file.unlink()
     print("   (cleaned up test_day17.json)")

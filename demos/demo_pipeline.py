@@ -7,11 +7,14 @@ demo_pipeline.py — демонстрация полного цикла News Age
 """
 
 import json
+import os
 import sys
 import tempfile
 import time
 from pathlib import Path
 from unittest.mock import MagicMock
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from news_agent.pipeline import NewsPipeline
 from news_agent.storage import PostStorage

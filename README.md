@@ -1,6 +1,6 @@
-# TinyAI — AI Курс (16 дней)
+# TinyAI — AI Курс (17 дней)
 
-Учебный проект: 16 дней от базового промптинга до MCP-интеграции с инструментами для управления логами и памятью.
+Учебный проект: 17 дней от базового промптинга до MCP-интеграции с инструментами для управления логами и памятью.
 
 > **Стек:** Python 3.9+ · Cloud.ru Foundation Models API · `zai-org/GLM-4.7` (reasoning) · OpenAI-compatible SDK · MCP (Model Context Protocol)
 
@@ -20,8 +20,11 @@ cp .env.example .env   # или создай вручную
 # 3. Запуск главного CLI
 python3 llm_cli.py
 
-# 4. Запуск FSM-агента журналиста (задача 15)
-python3 -u run_3topics.py --model zai-org/GLM-4.7 --max-tokens 4000
+# 4. Запуск FSM-агента журналиста
+python3 demos/run_3topics.py --model zai-org/GLM-4.7 --max-tokens 4000
+
+# 5. Запуск MCP-агента (День 17)
+python3 demos/demo_mcp_agent.py
 ```
 
 ---
@@ -42,80 +45,132 @@ python3 -u run_3topics.py --model zai-org/GLM-4.7 --max-tokens 4000
 ```
 tinyAI/
 │
-├── journalist_agent/           # Task 15 — FSM-агент журналиста
-│   ├── __init__.py
-│   ├── fsm_agent.py            # JournalistFSMAgent: streaming, logging, retry
-│   ├── workflow.py             # ContentType, FSM-состояния, переходы, guards
-│   ├── step_prompts.py         # Промпты для каждого шага каждого типа контента
-│   ├── invariants.py           # Инварианты и pre-check перед выполнением
-│   ├── invariants.json         # Правила инвариантов (JSON)
-│   └── agent.py                # Старый агент (без FSM, совместимость)
+├── llm_cli.py                  # Главный CLI (tasks 2–9): чат, генерация, agent, batch
+├── mcp_server.py               # MCP-сервер: 9 инструментов для логов и памяти
+├── mcp_client.py               # MCP-клиент: handshake + demo вызовов
+├── mcp_agent.py                # MCPAgent: диалоговый агент с function calling → MCP
 │
-├── news_agent/                 # Tasks 3–9, 16 — новостной агент
-│   ├── pipeline.py             # 5-шаговый NewsPipeline
-│   ├── agent.py                # ReAct AgentLoop с function calling
-│   ├── session_manager.py      # ConversationSession + SessionStorage
-│   ├── storage.py              # PostStorage
-│   ├── formatter.py            # OutputFormatter (md/html/telegram/json)
-│   ├── roles.py                # Системные промпты
-│   ├── tools.py                # Инструменты агента (6 локальных + 6 MCP)
-│   └── mcp_bridge.py           # MCP-мост: запускает mcp_server.py как подпроцесс
+├── news_agent/                 # Пакет: новостной агент (Tasks 3–9, 16)
+│   ├── agent.py                #   ReAct AgentLoop с function calling (12 итераций)
+│   ├── pipeline.py             #   5-шаговый NewsPipeline
+│   ├── roles.py                #   6 ролей + системные промпты
+│   ├── tools.py                #   Инструменты: 6 локальных + 9 MCP
+│   ├── mcp_bridge.py           #   MCP-мост → mcp_server.py (stdio, JSON-RPC)
+│   ├── storage.py              #   PostStorage (JSON на диск)
+│   ├── formatter.py            #   OutputFormatter (md/html/telegram/json)
+│   ├── session_manager.py      #   ConversationSession + SessionStorage
+│   ├── token_counter.py        #   Подсчёт токенов (tiktoken / fallback)
+│   ├── usage_tracker.py        #   Трекер API: токены, стоимость, время
+│   ├── context_strategies.py   #   Стратегии контекста: sliding, sticky_facts, branching
+│   ├── context_compressor.py   #   Автосуммаризация длинных диалогов
+│   ├── fsm_agent.py            #   ArticleFSMAgent (planning → done)
+│   ├── fsm_state.py            #   FSM: фазы, переходы, сохранение
+│   └── strategy_logger.py      #   Логирование стратегий
 │
-├── memory_agent/               # Task 11 — агент с памятью
+├── journalist_agent/           # Пакет: FSM-агент журналиста (Tasks 13–15)
+│   ├── fsm_agent.py            #   JournalistFSMAgent: streaming, retry, guards
+│   ├── workflow.py             #   4 типа контента × FSM-переходы
+│   ├── step_prompts.py         #   Промпты для каждого шага
+│   ├── invariants.py           #   Инварианты и pre-check
+│   ├── invariants.json         #   Правила инвариантов (данные)
+│   └── agent.py                #   Базовый агент (без FSM)
 │
-├── mcp_server.py               # MCP-сервер: инструменты для логов и памяти
-├── mcp_client.py               # MCP-клиент: handshake + список инструментов
-├── run_3topics.py              # Демо: 3 темы × FSM-агент, streaming, Tee-логи
-├── run_journalist_fsm.py       # Демо: одна задача с LLM
-├── run_journalist_interactive.py  # Интерактивный REPL для FSM
-├── run_journalist_agent.py     # Демо без FSM
-├── run_memory_agent.py         # Демо memory agent
-├── llm_cli.py                  # Главный CLI (tasks 2–9)
+├── memory_agent/               # Пакет: агент с памятью (Tasks 11–12)
+│   ├── memory.py               #   Трёхслойная память: short/working/long-term
+│   ├── agent.py                #   MemoryAgent с автоизвлечением блоков
+│   ├── personalized_agent.py   #   PersonalizedAgent с профилями
+│   └── profile.py              #   UserProfile + ProfileManager
 │
-├── test_journalist_fsm.py      # Тесты FSM-агента
-├── test_journalist_agent.py    # Тесты базового агента
-├── test_article_fsm.py         # Тесты workflow ARTICLE
-├── test_sessions.py
-├── test_llm_cli.py
-├── test_*.py                   # Остальные тесты
+├── demos/                      # Демо-скрипты и раннеры
+│   ├── demo_mcp_agent.py       #   День 17: MCPAgent с function calling
+│   ├── demo_article_fsm.py     #   День 13: FSM-агент статей
+│   ├── demo_compression.py     #   День 9: компрессия контекста
+│   ├── demo_personalization.py #   День 12: два профиля — аналитик vs журналист
+│   ├── demo_telegram_article.py#   День 12: статья про Telegram
+│   ├── demo_pipeline.py        #   День 3: 5-шаговый pipeline (mock)
+│   ├── demo_tokens.py          #   День 8: подсчёт токенов (mock)
+│   ├── run_3topics.py          #   День 15: 3 темы × FSM + streaming
+│   ├── run_journalist_fsm.py   #   День 14: одна задача с LLM
+│   ├── run_journalist_interactive.py  # День 15: интерактивный REPL
+│   ├── run_journalist_agent.py #   День 14: базовый агент (без FSM)
+│   ├── run_memory_agent.py     #   День 11: тест памяти
+│   └── run_strategy_benchmark.py  # День 10: бенчмарк стратегий
 │
-├── requirements.txt
-├── pytest.ini
+├── tests/                      # Тесты (pytest)
+│   ├── test_journalist_fsm.py  #   FSM-агент: start, advance, pause, resume
+│   ├── test_article_fsm.py     #   ARTICLE workflow, переходы
+│   ├── test_journalist_agent.py#   Базовый агент и инварианты
+│   ├── test_news_agent.py      #   Роли, инструменты, pipeline
+│   ├── test_sessions.py        #   Диалоговые сессии
+│   ├── test_llm_cli.py         #   CLI-функции
+│   ├── test_context_strategies.py  # Стратегии контекста
+│   ├── test_context_compressor.py  # Компрессия
+│   ├── test_token_counter.py   #   Подсчёт токенов
+│   ├── test_usage_tracker.py   #   Трекер использования
+│   ├── test_analytics.py       #   Аналитика и метрики
+│   ├── test_personalization.py #   Профили и персонализация
+│   ├── test_temperature.py     #   Влияние температуры
+│   ├── test_gpt54_temperature.py  # GPT-5.4 температура
+│   ├── test_model_parameters.py#   Параметры моделей
+│   └── test_mcp_server_day17.py#   MCP-сервер: 9 инструментов e2e
+│
+├── benchmarks/                 # Сравнения моделей
+│   ├── compare_models.py       #   3 модели × стиль блога
+│   ├── compare_models_chuck.py #   3 модели × новостная заметка
+│   └── results/                #   Результаты: JSON, MD, логи
+│
+├── docs/                       # Документация
+│   ├── tasks/                  #   README по каждому заданию (TASK2–TASK17)
+│   ├── ARCHITECTURE.md         #   Архитектурная схема
+│   ├── MODELS_INFO.md          #   Справочник моделей
+│   ├── TEMPERATURE_GUIDE.md    #   Влияние температуры
+│   ├── TESTING.md              #   Руководство по тестированию
+│   └── ...                     #   Остальная документация
+│
+├── pytest.ini                  # Конфигурация pytest (pythonpath, testpaths)
+├── requirements.txt            # Зависимости
 ├── .env                        # API-ключи (не в VCS)
-├── .gitignore
-│
-├── README.md                   # Этот файл
-├── ARCHITECTURE.md             # Архитектурная схема v7.0
-├── TASK16_README.md            # День 16: MCP-клиент и интеграция
-├── TASK15_README.md            # День 15: архитектурный анализ
-├── TASK14_README.md            # День 14: FSM-агент журналиста
-├── TASK13_README.md            # День 13: инварианты и guards
-├── TASK12_README.md            # День 12: memory agent
-├── TASK10_PLAN.md              # День 10: план разработки
-├── TASK9_README.md             # День 9: персонализация
-├── TASK8_README.md             # День 8: аналитика и метрики
-├── TASK7_README.md             # День 7: диалоговые сессии
-├── TASK6_README.md             # День 6: ReAct-агент
-├── TASK3_README.md             # День 3: news pipeline
-├── TASK2_README.md             # День 2: режимы форматирования
-├── MODELS_INFO.md              # Справочник моделей
-├── TEMPERATURE_GUIDE.md        # Влияние температуры
-└── TESTING.md                  # Руководство по тестированию
+└── .gitignore
 ```
 
-**Runtime-директории (не в VCS, в `.gitignore`):**
-```
-journalist_tasks_demo/   # JSON-состояния задач + run_*.log
-sessions/                # диалоговые сессии
-posts/                   # сгенерированные посты
-memory_data/             # долгосрочная память агента
-tasks/                   # задачи memory agent
-logs/                    # общие логи
-```
+### Runtime-директории (не в VCS, в `.gitignore`)
+
+| Директория | Содержимое |
+|---|---|
+| `logs/` | Логи разговоров, стратегий, бенчмарков |
+| `sessions/` | Диалоговые сессии (JSON) |
+| `posts/` | Сгенерированные новостные посты |
+| `memory_data/` | Долгосрочная память агента |
+| `tasks/` | Задачи memory agent |
+| `journalist_tasks_demo/` | JSON-состояния задач FSM + runtime логи |
 
 ---
 
-## Task 16 — MCP-интеграция
+## Task 17 — MCPAgent с function calling
+
+День 17: агент автоматически вызывает MCP-инструменты через function calling для работы с историей и памятью.
+
+```bash
+python3 demos/demo_mcp_agent.py
+```
+
+### 9 MCP-инструментов
+
+| Инструмент | Описание |
+|-----------|----------|
+| `list_logs` | Список файлов логов разговоров |
+| `read_log` | Содержимое конкретного лога |
+| `search_logs` | Поиск текста по всем логам |
+| `list_memory` | Список файлов долгосрочной памяти |
+| `read_memory` | Содержимое файла памяти |
+| `get_usage_stats` | Токены, стоимость, число разговоров |
+| `save_memory` | Записать данные в память (День 17) |
+| `delete_memory_key` | Удалить ключ из памяти (День 17) |
+| `get_conversation_summary` | Сводка разговора (День 17) |
+
+---
+
+## Task 16 — MCP-сервер и клиент
 
 День 16: локальный MCP-сервер управляет логами и памятью, агент подключается к нему как к инструментальному бэкенду.
 
@@ -124,6 +179,9 @@ logs/                    # общие логи
 ```bash
 # Запустить MCP-клиент — он сам поднимет сервер и выведет список инструментов
 python3 mcp_client.py
+
+# Тест MCP-сервера
+python3 tests/test_mcp_server_day17.py
 ```
 
 ### Что происходит
@@ -192,22 +250,22 @@ AgentLoop (agent.py)
 
 ```bash
 # Все три темы последовательно (streaming + автолог)
-python3 -u run_3topics.py \
+python3 -u demos/run_3topics.py \
   --model zai-org/GLM-4.7 \
   --max-tokens 4000 \
   --storage-dir journalist_tasks_demo
 
 # Только задача 1 (техника — ARTICLE)
-python3 -u run_3topics.py --task 1 --max-tokens 4000
+python3 -u demos/run_3topics.py --task 1 --max-tokens 4000
 
 # Задача 2 (финансы — NEWS_RESEARCH)
-python3 -u run_3topics.py --task 2 --max-tokens 4000
+python3 -u demos/run_3topics.py --task 2 --max-tokens 4000
 
 # Задача 3 (искусство — REVIEW)
-python3 -u run_3topics.py --task 3 --max-tokens 4000
+python3 -u demos/run_3topics.py --task 3 --max-tokens 4000
 
 # Без записи лога в файл
-python3 -u run_3topics.py --task 1 --no-log
+python3 -u demos/run_3topics.py --task 1 --no-log
 ```
 
 ### Аргументы run_3topics.py
@@ -289,16 +347,16 @@ news-agent> models                    # доступные модели
 
 ```bash
 # Все тесты
-pytest -v
+pytest tests/ -v
 
 # Только FSM-агент
-pytest test_journalist_fsm.py test_article_fsm.py -v
+pytest tests/test_journalist_fsm.py tests/test_article_fsm.py -v
 
 # Только news agent
-pytest test_sessions.py test_llm_cli.py -v
+pytest tests/test_sessions.py tests/test_llm_cli.py -v
 
 # С выводом print
-pytest -v -s test_journalist_fsm.py
+pytest -v -s tests/test_journalist_fsm.py
 ```
 
 | Файл | Что проверяет |

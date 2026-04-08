@@ -57,6 +57,9 @@ journalist_tasks_demo/
 # Memory agent task storage
 tasks/
 
+# Benchmark output logs (results are in benchmarks/results/)
+benchmarks/results/*.log
+
 # Temp / debug scripts (not part of codebase)
 test_api_log.py
 

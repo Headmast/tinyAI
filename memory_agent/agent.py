@@ -11,6 +11,7 @@ MemoryAgent — диалоговый агент с явной трёхслойн
 Агент анализирует каждый ответ и решает, что сохранить и куда.
 """
 
+import re
 import time
 from typing import Any, Dict, List, Optional
 
