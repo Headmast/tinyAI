@@ -11,12 +11,15 @@ MCP-сервер для управления локальными логами �
   4. Каждое сообщение — отдельная строка JSON (newline-delimited)
 
 Доступные инструменты (tools):
-  - list_logs        — список файлов логов разговоров
-  - read_log         — прочитать конкретный лог
-  - search_logs      — поискать текст по всем логам
-  - list_memory      — список файлов памяти агента
-  - read_memory      — прочитать файл памяти
-  - get_usage_stats  — статистика использования токенов и стоимости
+  - list_logs                — список файлов логов разговоров
+  - read_log                 — прочитать конкретный лог
+  - search_logs              — поискать текст по всем логам
+  - list_memory              — список файлов памяти агента
+  - read_memory              — прочитать файл памяти
+  - get_usage_stats          — статистика использования токенов и стоимости
+  - save_memory              — записать данные в файл памяти (День 17)
+  - delete_memory_key        — удалить ключ из файла памяти (День 17)
+  - get_conversation_summary — краткая сводка разговора (День 17)
 """
 
 import json
@@ -116,6 +119,61 @@ TOOLS = [
             "type": "object",
             "properties": {},
             "required": []
+        }
+    },
+    # ── День 17: новые инструменты ────────────────────────────────────────────
+    {
+        "name": "save_memory",
+        "description": "Записывает данные в файл долгосрочной памяти агента. Создаёт файл если не существует, обновляет ключи если существует.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Имя файла памяти (например agent_notes.json)"
+                },
+                "key": {
+                    "type": "string",
+                    "description": "Ключ для записи (например 'user_preferences')"
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Значение для записи (строка или JSON-строка)"
+                }
+            },
+            "required": ["filename", "key", "value"]
+        }
+    },
+    {
+        "name": "delete_memory_key",
+        "description": "Удаляет конкретный ключ из файла долгосрочной памяти.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Имя файла памяти"
+                },
+                "key": {
+                    "type": "string",
+                    "description": "Ключ для удаления"
+                }
+            },
+            "required": ["filename", "key"]
+        }
+    },
+    {
+        "name": "get_conversation_summary",
+        "description": "Возвращает краткую сводку разговора: число сообщений, период, общее число токенов, первые и последние темы.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Имя файла лога разговора"
+                }
+            },
+            "required": ["filename"]
         }
     }
 ]
@@ -299,6 +357,134 @@ def tool_get_usage_stats(args: dict) -> str:
     return "\n".join(lines)
 
 
+# ── День 17: новые инструменты ───────────────────────────────────────────────
+
+def tool_save_memory(args: dict) -> str:
+    """Записывает данные в файл памяти (создаёт или обновляет)."""
+    filename = args.get("filename", "")
+    key = args.get("key", "")
+    value_raw = args.get("value", "")
+
+    if not filename or not key:
+        return "Ошибка: filename и key обязательны."
+
+    # Защита от path traversal
+    safe_path = (MEMORY_DIR / Path(filename).name).resolve()
+    if not str(safe_path).startswith(str(MEMORY_DIR.resolve())):
+        return "Ошибка: недопустимый путь к файлу."
+
+    # Парсим value как JSON если возможно
+    try:
+        value = json.loads(value_raw)
+    except (json.JSONDecodeError, TypeError):
+        value = value_raw
+
+    # Создаём директорию если нет
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Загружаем существующие данные или создаём новый dict
+    if safe_path.exists():
+        with open(safe_path, encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                data = {}
+    else:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {"_original": data}
+
+    data[key] = value
+    data["_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with open(safe_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return f"Сохранено: {filename} → ключ '{key}' записан."
+
+
+def tool_delete_memory_key(args: dict) -> str:
+    """Удаляет ключ из файла памяти."""
+    filename = args.get("filename", "")
+    key = args.get("key", "")
+
+    if not filename or not key:
+        return "Ошибка: filename и key обязательны."
+
+    safe_path = (MEMORY_DIR / Path(filename).name).resolve()
+    if not str(safe_path).startswith(str(MEMORY_DIR.resolve())):
+        return "Ошибка: недопустимый путь к файлу."
+    if not safe_path.exists():
+        return f"Файл не найден: {filename}"
+
+    with open(safe_path, encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return "Ошибка: файл содержит невалидный JSON."
+
+    if not isinstance(data, dict):
+        return "Ошибка: файл не содержит JSON-объект."
+
+    if key not in data:
+        return f"Ключ '{key}' не найден в {filename}."
+
+    del data[key]
+    data["_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with open(safe_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return f"Удалено: ключ '{key}' из {filename}."
+
+
+def tool_get_conversation_summary(args: dict) -> str:
+    """Краткая сводка разговора: число сообщений, период, темы."""
+    filename = args.get("filename", "")
+
+    safe_path = (LOGS_DIR / Path(filename).name).resolve()
+    if not str(safe_path).startswith(str(LOGS_DIR.resolve())):
+        return "Ошибка: недопустимый путь к файлу."
+    if not safe_path.exists():
+        return f"Файл не найден: {filename}"
+
+    with open(safe_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, list) or len(data) == 0:
+        return "Файл не содержит сообщений."
+
+    total_msgs = len(data)
+    total_tokens = sum(m.get("usage", {}).get("total_tokens", 0) for m in data)
+    total_cost = sum(m.get("usage", {}).get("cost", 0.0) for m in data)
+
+    first_ts = data[0].get("timestamp", "?")[:19]
+    last_ts = data[-1].get("timestamp", "?")[:19]
+
+    # Первые 3 и последние 3 темы (user_input)
+    first_topics = [m.get("user_input", "")[:60] for m in data[:3]]
+    last_topics = [m.get("user_input", "")[:60] for m in data[-3:]]
+
+    lines = [
+        f"Сводка: {filename}",
+        f"  Сообщений: {total_msgs}",
+        f"  Период: {first_ts} — {last_ts}",
+        f"  Токенов: {total_tokens:,}",
+        f"  Стоимость: ${total_cost:.4f}",
+        "",
+        "  Первые темы:",
+    ]
+    for t in first_topics:
+        lines.append(f"    • {t}")
+    lines.append("")
+    lines.append("  Последние темы:")
+    for t in last_topics:
+        lines.append(f"    • {t}")
+
+    return "\n".join(lines)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # JSON-RPC / MCP dispatch
 # ══════════════════════════════════════════════════════════════════════════════
@@ -310,6 +496,9 @@ TOOL_HANDLERS = {
     "list_memory": tool_list_memory,
     "read_memory": tool_read_memory,
     "get_usage_stats": tool_get_usage_stats,
+    "save_memory": tool_save_memory,
+    "delete_memory_key": tool_delete_memory_key,
+    "get_conversation_summary": tool_get_conversation_summary,
 }
 
 

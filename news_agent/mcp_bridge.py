@@ -27,6 +27,9 @@ MCP_TOOLS = {
     "list_memory",
     "read_memory",
     "get_usage_stats",
+    "save_memory",
+    "delete_memory_key",
+    "get_conversation_summary",
 }
 
 
