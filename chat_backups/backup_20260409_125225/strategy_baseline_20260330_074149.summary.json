@@ -1,0 +1,13 @@
+{
+  "strategy": "baseline",
+  "model": "gpt-5.4-mini",
+  "session_id": "",
+  "total_turns": 20,
+  "total_prompt_tokens": 103038,
+  "total_completion_tokens": 12713,
+  "total_extraction_tokens": 0,
+  "total_all_tokens": 115751,
+  "avg_response_time_ms": 4012.4,
+  "total_elapsed_s": 80.3,
+  "log_file": "logs/strategy_baseline_20260330_074149.jsonl"
+}

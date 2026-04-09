@@ -1,0 +1,13 @@
+{
+  "strategy": "sticky_facts",
+  "model": "gpt-5.4-mini",
+  "session_id": "",
+  "total_turns": 20,
+  "total_prompt_tokens": 32573,
+  "total_completion_tokens": 11872,
+  "total_extraction_tokens": 32690,
+  "total_all_tokens": 77135,
+  "avg_response_time_ms": 3480.8,
+  "total_elapsed_s": 102.8,
+  "log_file": "logs/strategy_sticky_facts_20260330_074429.jsonl"
+}

@@ -1,0 +1,13 @@
+{
+  "strategy": "branching",
+  "model": "gpt-5.4-mini",
+  "session_id": "",
+  "total_turns": 20,
+  "total_prompt_tokens": 91155,
+  "total_completion_tokens": 11611,
+  "total_extraction_tokens": 0,
+  "total_all_tokens": 102766,
+  "avg_response_time_ms": 3468.6,
+  "total_elapsed_s": 69.4,
+  "log_file": "logs/strategy_branching_20260330_074612.jsonl"
+}

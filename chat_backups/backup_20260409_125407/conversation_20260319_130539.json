@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2026-03-19T13:06:09.488803",
+    "user_input": "Test",
+    "assistant_response": "Hello! How can I help you today?",
+    "usage": {
+      "prompt_tokens": 6,
+      "completion_tokens": 262,
+      "total_tokens": 268,
+      "word_count": 7,
+      "cost": 0.0,
+      "model": "zai-org/GLM-4.7-Flash"
+    },
+    "metadata": {
+      "mode": "unrestricted"
+    }
+  }
+]

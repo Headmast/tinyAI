@@ -1,0 +1,202 @@
+{
+  "timestamp": "2026-03-30T07:47:22.101074",
+  "model": "gpt-5.4-mini",
+  "prompts_count": 20,
+  "summaries": {
+    "baseline": {
+      "strategy": "baseline",
+      "model": "gpt-5.4-mini",
+      "session_id": "",
+      "total_turns": 20,
+      "total_prompt_tokens": 103038,
+      "total_completion_tokens": 12713,
+      "total_extraction_tokens": 0,
+      "total_all_tokens": 115751,
+      "avg_response_time_ms": 4012.4,
+      "total_elapsed_s": 80.3,
+      "log_file": "logs/strategy_baseline_20260330_074149.jsonl"
+    },
+    "sliding_window": {
+      "strategy": "sliding_window",
+      "model": "gpt-5.4-mini",
+      "session_id": "",
+      "total_turns": 20,
+      "total_prompt_tokens": 50824,
+      "total_completion_tokens": 13707,
+      "total_extraction_tokens": 0,
+      "total_all_tokens": 64531,
+      "avg_response_time_ms": 3985.8,
+      "total_elapsed_s": 79.7,
+      "log_file": "logs/strategy_sliding_window_20260330_074310.jsonl"
+    },
+    "sticky_facts": {
+      "strategy": "sticky_facts",
+      "model": "gpt-5.4-mini",
+      "session_id": "",
+      "total_turns": 20,
+      "total_prompt_tokens": 32573,
+      "total_completion_tokens": 11872,
+      "total_extraction_tokens": 32690,
+      "total_all_tokens": 77135,
+      "avg_response_time_ms": 3480.8,
+      "total_elapsed_s": 102.8,
+      "log_file": "logs/strategy_sticky_facts_20260330_074429.jsonl"
+    },
+    "branching": {
+      "strategy": "branching",
+      "model": "gpt-5.4-mini",
+      "session_id": "",
+      "total_turns": 20,
+      "total_prompt_tokens": 91155,
+      "total_completion_tokens": 11611,
+      "total_extraction_tokens": 0,
+      "total_all_tokens": 102766,
+      "avg_response_time_ms": 3468.6,
+      "total_elapsed_s": 69.4,
+      "log_file": "logs/strategy_branching_20260330_074612.jsonl"
+    }
+  },
+  "quality_analysis": {
+    "baseline": {
+      "strategy": "baseline",
+      "total_responses": 20,
+      "memory_test_14": {
+        "remembers_budget": false,
+        "remembers_deadline": true,
+        "keywords_found": [
+          "6 месяц",
+          "6 мес"
+        ]
+      },
+      "tz_completeness_18": {
+        "facts_found": 0,
+        "facts_total": 28,
+        "percentage": 0.0,
+        "keywords_found": []
+      },
+      "summary_completeness_20": {
+        "facts_found": 20,
+        "facts_total": 28,
+        "percentage": 71.4,
+        "keywords_found": [
+          "6 месяц",
+          "6 мес",
+          "ios",
+          "android",
+          "flutter",
+          "fastapi",
+          "postgresql",
+          "299",
+          "подписк",
+          "apple health",
+          "google fit",
+          "оффлайн",
+          "без интернет",
+          "геймифик",
+          "бейдж",
+          "push",
+          "уведомлен",
+          "25–45",
+          "минималист",
+          "тёмн"
+        ]
+      }
+    },
+    "sliding_window": {
+      "strategy": "sliding_window",
+      "total_responses": 20,
+      "memory_test_14": {
+        "remembers_budget": true,
+        "remembers_deadline": true,
+        "keywords_found": [
+          "2 млн",
+          "6 месяц",
+          "6 мес"
+        ]
+      },
+      "tz_completeness_18": {
+        "facts_found": 0,
+        "facts_total": 28,
+        "percentage": 0.0,
+        "keywords_found": []
+      },
+      "summary_completeness_20": {
+        "facts_found": 11,
+        "facts_total": 28,
+        "percentage": 39.3,
+        "keywords_found": [
+          "ios",
+          "android",
+          "flutter",
+          "fastapi",
+          "postgresql",
+          "apple health",
+          "google fit",
+          "оффлайн",
+          "без интернет",
+          "push",
+          "уведомлен"
+        ]
+      }
+    },
+    "sticky_facts": {
+      "strategy": "sticky_facts",
+      "total_responses": 20,
+      "memory_test_14": {
+        "remembers_budget": true,
+        "remembers_deadline": true,
+        "keywords_found": [
+          "2 миллион",
+          "6 месяц",
+          "6 мес"
+        ]
+      },
+      "tz_completeness_18": {
+        "facts_found": 0,
+        "facts_total": 28,
+        "percentage": 0.0,
+        "keywords_found": []
+      },
+      "summary_completeness_20": {
+        "facts_found": 21,
+        "facts_total": 28,
+        "percentage": 75.0,
+        "keywords_found": [
+          "2 млн",
+          "6 месяц",
+          "6 мес",
+          "ios",
+          "android",
+          "flutter",
+          "fastapi",
+          "postgresql",
+          "299",
+          "подписк",
+          "apple health",
+          "google fit",
+          "оффлайн",
+          "геймифик",
+          "достижен",
+          "бейдж",
+          "push",
+          "уведомлен",
+          "25–45",
+          "минималист",
+          "тёмн"
+        ]
+      }
+    },
+    "branching": {
+      "strategy": "branching",
+      "main_responses": 10,
+      "branch_a_responses": 5,
+      "branch_b_responses": 5
+    }
+  },
+  "log_files": [
+    "logs/strategy_baseline_20260330_074149.jsonl",
+    "logs/strategy_sliding_window_20260330_074310.jsonl",
+    "logs/strategy_sticky_facts_20260330_074429.jsonl",
+    "logs/strategy_branching_20260330_074612.jsonl"
+  ]
+}

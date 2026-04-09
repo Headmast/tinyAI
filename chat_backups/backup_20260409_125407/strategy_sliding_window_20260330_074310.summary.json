@@ -1,0 +1,13 @@
+{
+  "strategy": "sliding_window",
+  "model": "gpt-5.4-mini",
+  "session_id": "",
+  "total_turns": 20,
+  "total_prompt_tokens": 50824,
+  "total_completion_tokens": 13707,
+  "total_extraction_tokens": 0,
+  "total_all_tokens": 64531,
+  "avg_response_time_ms": 3985.8,
+  "total_elapsed_s": 79.7,
+  "log_file": "logs/strategy_sliding_window_20260330_074310.jsonl"
+}
