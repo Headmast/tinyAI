@@ -57,6 +57,9 @@ journalist_tasks_demo/
 # Memory agent task storage
 tasks/
 
+# Pipeline content data (raw/generated content, not for VCS)
+pipeline_data/
+
 # Benchmark output logs (results are in benchmarks/results/)
 benchmarks/results/*.log
 
