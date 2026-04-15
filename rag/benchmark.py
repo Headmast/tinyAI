@@ -197,7 +197,7 @@ def evaluate_answer(
 
     return {
         "question_id": question_spec["id"],
-        "question": question_spec["question"][:80] + "…",
+        "question": question_spec["question"],
         "keyword_hits_no_rag": kw_hits_no_rag,
         "keyword_hits_rag": kw_hits_rag,
         "total_keywords": len(keywords),

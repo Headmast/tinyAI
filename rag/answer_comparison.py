@@ -137,69 +137,71 @@ def compare_all(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 # ── Форматированный вывод ─────────────────────────────────────────────────────
 
-_W = 70  # ширина блока ответа
+_SEP = "═" * 80
 
 
-def _truncate(text: str, max_chars: int = 300) -> str:
-    text = text.strip().replace("\n", " ")
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "…"
+def _wrap(text: str, indent: str = "  ") -> str:
+    """Оборачивает текст ответа с отступом, сохраняя оригинальные переводы строк."""
+    lines = text.strip().splitlines()
+    return "\n".join(f"{indent}{line}" if line.strip() else "" for line in lines)
+
+
+def print_final_summary(comparisons: List[Dict[str, Any]]) -> None:
+    """Печатает итоговую таблицу метрик по всем сравнениям."""
+    if not comparisons:
+        return
+    agg = compare_all(comparisons)
+    win_pct = agg["rag_win_rate"] * 100
+    print("\n" + _SEP)
+    print(f"  ИТОГ: RAG побеждает в {agg['rag_wins']}/{agg['total_questions']} "
+          f"вопросах ({win_pct:.0f}%)")
+    print(f"  Avg keyword precision:  "
+          f"no_rag={agg['avg_keyword_hit_no_rag']:.1f}/{agg['avg_total_keywords']:.1f}  "
+          f"→  rag={agg['avg_keyword_hit_rag']:.1f}/{agg['avg_total_keywords']:.1f}")
+    print(f"  Avg source precision:   {agg['avg_source_precision'] * 100:.0f}%")
+    print(f"  Avg tokens:             "
+          f"no_rag={agg['avg_tokens_no_rag']:.0f}  "
+          f"rag={agg['avg_tokens_rag']:.0f}  "
+          f"(overhead ×{agg['avg_tokens_rag'] / max(agg['avg_tokens_no_rag'], 1):.1f})")
+    print(f"  Avg latency:            "
+          f"no_rag={agg['avg_latency_no_rag_ms']:.0f}ms  "
+          f"rag={agg['avg_latency_rag_ms']:.0f}ms")
+    print(_SEP)
 
 
 def print_comparison_report(comparisons: List[Dict[str, Any]]) -> None:
-    """Выводит side-by-side сравнение для каждого вопроса."""
+    """Выводит полные тексты ответов для каждого вопроса."""
     for c in comparisons:
         q_id = c["question_id"]
-        question_short = c["question"][:65] + ("…" if len(c["question"]) > 65 else "")
         ev = c["evaluation"]
         no_rag = c["no_rag"]
         rag = c["rag"]
 
-        win_mark = "✅ RAG WIN" if ev["rag_wins"] else "  ─ draw/no_rag"
+        win_mark = "✅ RAG WIN" if ev["rag_wins"] else "─ ничья/no_rag"
         kw_nr = f"{ev['keyword_hits_no_rag']}/{ev['total_keywords']}"
         kw_r = f"{ev['keyword_hits_rag']}/{ev['total_keywords']}"
         src_mark = f"{ev['source_hits']}/{ev['total_sources']}"
+        sources_str = "\n  ".join(rag["sources"]) if rag["sources"] else "—"
 
-        print(f"\n╔══ Q{q_id:02d}: {question_short:{_W - 10}}")
-        print("╠" + "─" * (_W + 12))
+        print(f"\n{_SEP}")
+        print(f"  Q{q_id:02d}. {c['question']}")
+        print(_SEP)
 
-        # NO RAG block
-        answer_nr = _truncate(no_rag["answer"])
-        print(f"║ NO RAG │ {answer_nr}")
-        print(f"║        │ keywords: {kw_nr}  "
-              f"tokens: {no_rag['tokens_total']}  "
-              f"latency: {no_rag['elapsed_ms']:.0f}ms")
+        # ── БЕЗ RAG ──
+        print(f"\n  ▶ БЕЗ RAG  │ keywords: {kw_nr}  │  "
+              f"tokens: {no_rag['tokens_total']}  │  latency: {no_rag['elapsed_ms']:.0f}ms")
+        print("  " + "─" * 76)
+        print(_wrap(no_rag["answer"]))
 
-        print("╠" + "─" * (_W + 12))
+        # ── С RAG ──
+        print(f"\n  ▶ С RAG    │ keywords: {kw_r}  │  "
+              f"tokens: {rag['tokens_total']}  │  latency: {rag['elapsed_ms']:.0f}ms  │  "
+              f"chunks: {rag['chunks_used']}  │  {win_mark}")
+        print(f"  Источники: {sources_str}")
+        print("  " + "─" * 76)
+        print(_wrap(rag["answer"]))
 
-        # RAG block
-        answer_r = _truncate(rag["answer"])
-        sources_str = ", ".join(rag["sources"]) if rag["sources"] else "—"
-        print(f"║ RAG    │ {answer_r}")
-        print(f"║        │ keywords: {kw_r}  "
-              f"tokens: {rag['tokens_total']}  "
-              f"latency: {rag['elapsed_ms']:.0f}ms  "
-              f"chunks: {rag['chunks_used']}  {win_mark}")
-        print(f"║        │ sources: {sources_str}")
-        print(f"╚══ src hits: {src_mark}")
+        print(f"\n  [src precision: {src_mark}]")
 
     # Итоговые метрики
-    if comparisons:
-        agg = compare_all(comparisons)
-        win_pct = agg["rag_win_rate"] * 100
-        print("\n" + "═" * (_W + 14))
-        print(f"  ИТОГ: RAG побеждает в {agg['rag_wins']}/{agg['total_questions']} "
-              f"вопросах ({win_pct:.0f}%)")
-        print(f"  Avg keyword precision:  "
-              f"no_rag={agg['avg_keyword_hit_no_rag']:.1f}/{agg['avg_total_keywords']:.1f}  "
-              f"→  rag={agg['avg_keyword_hit_rag']:.1f}/{agg['avg_total_keywords']:.1f}")
-        print(f"  Avg source precision:   {agg['avg_source_precision'] * 100:.0f}%")
-        print(f"  Avg tokens:             "
-              f"no_rag={agg['avg_tokens_no_rag']:.0f}  "
-              f"rag={agg['avg_tokens_rag']:.0f}  "
-              f"(overhead ×{agg['avg_tokens_rag'] / max(agg['avg_tokens_no_rag'], 1):.1f})")
-        print(f"  Avg latency:            "
-              f"no_rag={agg['avg_latency_no_rag_ms']:.0f}ms  "
-              f"rag={agg['avg_latency_rag_ms']:.0f}ms")
-        print("═" * (_W + 14))
+    print_final_summary(comparisons)

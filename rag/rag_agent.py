@@ -86,7 +86,7 @@ class RagAgent:
 
     # ── Публичный интерфейс ───────────────────────────────────────────────────
 
-    def ask_without_rag(self, question: str) -> Dict[str, Any]:
+    def ask_without_rag(self, question: str, stream: bool = False) -> Dict[str, Any]:
         """
         Прямой запрос к LLM без поиска по документам.
 
@@ -99,13 +99,17 @@ class RagAgent:
         ]
 
         t0 = time.monotonic()
-        response = self._call_llm(messages)
-        elapsed_ms = (time.monotonic() - t0) * 1000
+        if stream:
+            answer = self._stream_llm(messages)
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        else:
+            response = self._call_llm(messages)
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            answer = response.choices[0].message.content or ""
+            token_usage = self._extract_usage(response)
 
-        answer = response.choices[0].message.content or ""
-        token_usage = self._extract_usage(response)
-
-        if self.verbose:
+        if self.verbose and not stream:
             print(f"  [no_rag] tokens={token_usage['total_tokens']} "
                   f"elapsed={elapsed_ms:.0f}ms")
 
@@ -120,6 +124,7 @@ class RagAgent:
         self,
         question: str,
         top_k: Optional[int] = None,
+        stream: bool = False,
     ) -> Dict[str, Any]:
         """
         Поиск релевантных чанков → инжекция контекста → запрос к LLM.
@@ -165,13 +170,17 @@ class RagAgent:
         ]
 
         t0 = time.monotonic()
-        response = self._call_llm(messages)
-        elapsed_ms = (time.monotonic() - t0) * 1000
+        if stream:
+            answer = self._stream_llm(messages)
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        else:
+            response = self._call_llm(messages)
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            answer = response.choices[0].message.content or ""
+            token_usage = self._extract_usage(response)
 
-        answer = response.choices[0].message.content or ""
-        token_usage = self._extract_usage(response)
-
-        if self.verbose:
+        if self.verbose and not stream:
             print(f"  [rag] chunks={len(results)} sources={len(sources_set)} "
                   f"tokens={token_usage['total_tokens']} elapsed={elapsed_ms:.0f}ms")
 
@@ -184,7 +193,7 @@ class RagAgent:
             "mode": "rag",
         }
 
-    def compare(self, question: str) -> Dict[str, Any]:
+    def compare(self, question: str, stream: bool = False) -> Dict[str, Any]:
         """
         Запускает оба режима и возвращает объединённый результат.
 
@@ -193,8 +202,8 @@ class RagAgent:
         """
         return {
             "question": question,
-            "no_rag": self.ask_without_rag(question),
-            "rag": self.ask_with_rag(question),
+            "no_rag": self.ask_without_rag(question, stream=stream),
+            "rag": self.ask_with_rag(question, stream=stream),
         }
 
     # ── Внутренние методы ─────────────────────────────────────────────────────
@@ -203,7 +212,7 @@ class RagAgent:
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_completion_tokens": 2000,
+            "max_tokens": 2000,
             "temperature": self.temperature,
         }
 
@@ -217,6 +226,95 @@ class RagAgent:
                     time.sleep(2)
                 else:
                     raise
+
+    def _stream_llm(self, messages: List[Dict[str, str]], indent: str = "  ") -> str:
+        """
+        Стримит ответ LLM в stdout чанками.
+        Блоки <think>…</think> выводятся жёлтым с пометкой «Рассуждение».
+        Returns: полный текст ответа (без тегов think).
+        """
+        THINK_OPEN = "<think>"
+        THINK_CLOSE = "</think>"
+        LONGEST_TAG = max(len(THINK_OPEN), len(THINK_CLOSE))
+
+        full_text = ""
+        answer_text = ""   # текст без think-блоков
+        in_think = False
+        buf = ""
+
+        sys.stdout.write(indent)
+        sys.stdout.flush()
+
+        stream_resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=2000,
+            temperature=self.temperature,
+            stream=True,
+        )
+
+        for chunk in stream_resp:
+            if not chunk.choices:
+                continue
+            delta = getattr(chunk.choices[0], "delta", None)
+            token = (getattr(delta, "content", "") or "") if delta else ""
+            if not token:
+                continue
+
+            full_text += token
+            buf += token
+
+            while buf:
+                if not in_think:
+                    idx = buf.find(THINK_OPEN)
+                    if idx != -1:
+                        before = buf[:idx]
+                        if before:
+                            sys.stdout.write(before.replace("\n", f"\n{indent}"))
+                            answer_text += before
+                        sys.stdout.write(
+                            f"\n{indent}\033[33m💭 Рассуждение:\033[0m\n{indent}\033[2m"
+                        )
+                        sys.stdout.flush()
+                        buf = buf[idx + len(THINK_OPEN):]
+                        in_think = True
+                    else:
+                        safe = max(0, len(buf) - LONGEST_TAG + 1)
+                        if safe > 0:
+                            chunk_out = buf[:safe]
+                            sys.stdout.write(chunk_out.replace("\n", f"\n{indent}"))
+                            sys.stdout.flush()
+                            answer_text += chunk_out
+                            buf = buf[safe:]
+                        break
+                else:  # in_think
+                    idx = buf.find(THINK_CLOSE)
+                    if idx != -1:
+                        think_chunk = buf[:idx]
+                        if think_chunk:
+                            sys.stdout.write(think_chunk.replace("\n", f"\n{indent}"))
+                        sys.stdout.write(f"\033[0m\n{indent}{'─' * 50}\n{indent}")
+                        sys.stdout.flush()
+                        buf = buf[idx + len(THINK_CLOSE):]
+                        in_think = False
+                    else:
+                        safe = max(0, len(buf) - LONGEST_TAG + 1)
+                        if safe > 0:
+                            sys.stdout.write(buf[:safe].replace("\n", f"\n{indent}"))
+                            sys.stdout.flush()
+                            buf = buf[safe:]
+                        break
+
+        if buf:
+            sys.stdout.write(buf.replace("\n", f"\n{indent}"))
+            if not in_think:
+                answer_text += buf
+        if in_think:
+            sys.stdout.write("\033[0m")
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+        return answer_text.strip()
 
     @staticmethod
     def _extract_usage(response: Any) -> Dict[str, int]:
