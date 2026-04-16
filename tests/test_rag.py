@@ -405,3 +405,116 @@ class TestDocumentLoading:
             docs = load_documents(tmpdir)
             assert len(docs) == 1
             assert docs[0].metadata["title"] == "Nested"
+
+
+# ── Search pipeline (offline) ────────────────────────────────────────────────
+
+class TestSearchPipeline:
+    def _fake_chunk_rows(self):
+        return [
+            {
+                "faiss_id": 0,
+                "chunk_id": "c0",
+                "source": "docs/ARCHITECTURE.md",
+                "title": "Arch",
+                "section": "A",
+                "strategy": "structure",
+                "token_count": 10,
+                "char_count": 20,
+                "chunk_index": 0,
+                "text": "high relevance",
+            },
+            {
+                "faiss_id": 1,
+                "chunk_id": "c1",
+                "source": "docs/ARCHITECTURE.md",
+                "title": "Arch",
+                "section": "B",
+                "strategy": "structure",
+                "token_count": 11,
+                "char_count": 21,
+                "chunk_index": 1,
+                "text": "medium relevance",
+            },
+            {
+                "faiss_id": 2,
+                "chunk_id": "c2",
+                "source": "docs/ARCHITECTURE.md",
+                "title": "Arch",
+                "section": "C",
+                "strategy": "structure",
+                "token_count": 12,
+                "char_count": 22,
+                "chunk_index": 2,
+                "text": "low relevance",
+            },
+        ]
+
+    def test_threshold_and_top_k_after(self):
+        from rag.search import search
+
+        mock_embedder = MagicMock()
+        mock_embedder.embed_query.return_value = np.ones((1, 16), dtype=np.float32)
+
+        mock_store = MagicMock()
+        mock_store.search.return_value = (
+            np.array([[0.90, 0.50, 0.20]], dtype=np.float32),
+            np.array([[0, 1, 2]], dtype=np.int64),
+        )
+
+        with patch("rag.search.OpenAIEmbedder", return_value=mock_embedder), patch(
+            "rag.search.FAISSIndexStore", return_value=mock_store
+        ), patch(
+            "rag.search.get_chunks_by_faiss_ids", return_value=self._fake_chunk_rows()
+        ):
+            results = search(
+                query="test",
+                strategy="structure",
+                index_dir="rag_data",
+                top_k_before=3,
+                top_k_after=2,
+                similarity_threshold=0.40,
+            )
+
+        assert len(results) == 2
+        assert results[0].score >= 0.5
+        assert results[1].score >= 0.5
+        assert all(r.rank in (1, 2) for r in results)
+
+    def test_reranker_changes_order(self):
+        from rag.search import search
+
+        mock_embedder = MagicMock()
+        mock_embedder.embed_query.return_value = np.ones((1, 16), dtype=np.float32)
+
+        mock_store = MagicMock()
+        mock_store.search.return_value = (
+            np.array([[0.90, 0.80, 0.70]], dtype=np.float32),
+            np.array([[0, 1, 2]], dtype=np.int64),
+        )
+
+        class _FakeReranker:
+            def rerank(self, query, candidates):
+                out = list(reversed(candidates))
+                out[0].score = 0.99
+                return out
+
+        with patch("rag.search.OpenAIEmbedder", return_value=mock_embedder), patch(
+            "rag.search.FAISSIndexStore", return_value=mock_store
+        ), patch(
+            "rag.search.get_chunks_by_faiss_ids", return_value=self._fake_chunk_rows()
+        ):
+            results = search(
+                query="test",
+                strategy="structure",
+                index_dir="rag_data",
+                top_k_before=3,
+                top_k_after=2,
+                similarity_threshold=0.0,
+                reranker=_FakeReranker(),
+            )
+
+        assert len(results) == 2
+        assert results[0].score == pytest.approx(0.99)
+        assert results[0].rank == 1
+        assert results[1].rank == 2

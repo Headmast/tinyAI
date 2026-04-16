@@ -193,3 +193,27 @@ mode = modes[2]  # Режим с max_completion_tokens=100
    ├─ Параметры: 100%
    └─ Температуры: 100%
 ```
+
+---
+
+## RAG v2: rewrite + reranking
+
+Для проверки улучшенного RAG (Task 23) используйте offline-набор:
+
+```bash
+pytest tests/test_rag.py tests/test_rag_agent.py -m "not api" -v
+```
+
+Что проверяется:
+
+- пороговая фильтрация `similarity_threshold`
+- `top_k_before` и `top_k_after`
+- reranker-пересортировка кандидатов
+- включение/выключение query rewrite и rerank в `RagAgent`
+- сравнение 4 режимов (`baseline`, `rewrite_only`, `rerank_only`, `combined`)
+
+Smoke-команда для сравнительного запуска режимов:
+
+```bash
+python -m rag.benchmark --modes --strategy structure --top-k-before 10 --top-k 5 --threshold 0.30
+```

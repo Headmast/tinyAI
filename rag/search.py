@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from rag import Chunk, SearchResult
 from rag.embedder import OpenAIEmbedder
 from rag.index_store import FAISSIndexStore, get_chunks_by_faiss_ids
+from rag.reranker import RerankerProtocol
 
 DEFAULT_INDEX_DIR = Path(__file__).parent.parent / "rag_data"
 
@@ -28,16 +29,32 @@ def search(
     top_k: int = 5,
     strategy: Optional[str] = None,
     index_dir: str | Path = DEFAULT_INDEX_DIR,
+    top_k_before: Optional[int] = None,
+    top_k_after: Optional[int] = None,
+    similarity_threshold: float = 0.0,
+    reranker: Optional[RerankerProtocol] = None,
 ) -> List[SearchResult]:
     """
     Поиск релевантных чанков по текстовому запросу.
 
     Args:
         query: текст запроса
-        top_k: количество результатов
+        top_k: количество результатов (legacy-параметр, эквивалент top_k_after)
         strategy: 'fixed_size' или 'structure' (если None — оба, нужен конкретный)
         index_dir: директория с индексом
+        top_k_before: кол-во кандидатов до этапа rerank/filter
+        top_k_after: кол-во результатов после rerank/filter
+        similarity_threshold: порог similarity для отсечения нерелевантных результатов
+        reranker: второй этап ранжирования (опционально)
     """
+    final_k = top_k_after if top_k_after is not None else top_k
+    initial_k = top_k_before if top_k_before is not None else final_k
+
+    if initial_k <= 0:
+        raise ValueError("top_k_before должен быть > 0")
+    if final_k <= 0:
+        raise ValueError("top_k_after/top_k должен быть > 0")
+
     index_path = Path(index_dir)
     store = FAISSIndexStore(index_dir=index_path)
     embedder = OpenAIEmbedder()
@@ -60,7 +77,7 @@ def search(
     all_results: List[SearchResult] = []
 
     for strat in strategies:
-        scores, indices = store.search(query_embedding, strategy=strat, top_k=top_k)
+        scores, indices = store.search(query_embedding, strategy=strat, top_k=initial_k)
 
         # Получаем FAISS id → metadata из SQLite
         faiss_ids = [int(idx) for idx in indices[0] if idx >= 0]
@@ -103,10 +120,21 @@ def search(
 
     # Сортируем по score (убывание) и пере-нумеруем
     all_results.sort(key=lambda r: r.score, reverse=True)
+
+    # Общий top-k до второго этапа (после merge по стратегиям).
+    all_results = all_results[:initial_k]
+
+    if similarity_threshold > 0:
+        all_results = [r for r in all_results if r.score >= similarity_threshold]
+
+    if reranker and all_results:
+        all_results = reranker.rerank(query=query, candidates=all_results)
+
+    all_results = all_results[:final_k]
     for i, r in enumerate(all_results):
         r.rank = i + 1
 
-    return all_results[:top_k]
+    return all_results
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

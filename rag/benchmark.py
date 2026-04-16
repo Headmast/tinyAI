@@ -209,7 +209,7 @@ def evaluate_answer(
 
 # ── Запуск бенчмарка ─────────────────────────────────────────────────────────
 
-def run_benchmark(agent: Any) -> List[Dict[str, Any]]:
+def run_benchmark(agent: Any, specs: List[Dict[str, Any]] | None = None) -> List[Dict[str, Any]]:
     """
     Прогоняет все 10 вопросов через RagAgent.compare() и оценивает ответы.
 
@@ -219,8 +219,9 @@ def run_benchmark(agent: Any) -> List[Dict[str, Any]]:
     Returns:
         список результатов с ключами compare_result + evaluation
     """
+    specs = specs or CONTROL_QUESTIONS
     results = []
-    for spec in CONTROL_QUESTIONS:
+    for spec in specs:
         print(f"  Q{spec['id']:02d}: {spec['question'][:60]}…")
         compare_result = agent.compare(spec["question"])
         evaluation = evaluate_answer(compare_result, spec)
@@ -230,6 +231,43 @@ def run_benchmark(agent: Any) -> List[Dict[str, Any]]:
             "evaluation": evaluation,
         })
     return results
+
+
+def run_modes_benchmark(
+    agent: Any,
+    specs: List[Dict[str, Any]] | None = None,
+) -> List[Dict[str, Any]]:
+    """
+    Прогоняет все 10 вопросов в 4 режимах RAG и оценивает ответы.
+
+    Режимы:
+        baseline      — без rewrite и без rerank
+        rewrite_only  — только rewrite
+        rerank_only   — только rerank/filter
+        combined      — rewrite + rerank/filter
+    """
+    from rag.answer_comparison import build_modes_comparison
+
+    specs = specs or CONTROL_QUESTIONS
+    results = []
+    for spec in specs:
+        print(f"  Q{spec['id']:02d}: {spec['question'][:60]}…")
+        modes_result = agent.compare_modes(spec["question"])
+        modes_eval = build_modes_comparison(modes_result, spec)
+        results.append({
+            "spec": spec,
+            "modes": modes_result,
+            "evaluation": modes_eval,
+        })
+    return results
+
+
+def print_modes_report(results: List[Dict[str, Any]]) -> None:
+    """Подробный отчёт по 4 режимам RAG."""
+    from rag.answer_comparison import print_modes_comparison_report
+
+    mode_comparisons = [r["evaluation"] for r in results]
+    print_modes_comparison_report(mode_comparisons)
 
 
 def print_report(results: List[Dict[str, Any]]) -> None:
@@ -296,14 +334,42 @@ def main() -> None:
                         help="Стратегия RAG-поиска (default: structure)")
     parser.add_argument("--top-k", type=int, default=5,
                         help="Количество чанков для контекста (default: 5)")
+    parser.add_argument("--top-k-before", type=int, default=10,
+                        help="Кандидаты до filter/rerank (default: 10)")
+    parser.add_argument("--threshold", type=float, default=0.30,
+                        help="Порог similarity (default: 0.30)")
+    parser.add_argument("--modes", action="store_true",
+                        help="Сравнить 4 режима: baseline/rewrite/rerank/combined")
+    parser.add_argument("--question-id", type=int, default=None,
+                        help="Запустить только один вопрос из CONTROL_QUESTIONS")
     args = parser.parse_args()
 
-    print(f"\n  Инициализация RagAgent (strategy={args.strategy}, top_k={args.top_k})…")
-    agent = RagAgent(strategy=args.strategy, top_k=args.top_k, verbose=True)
+    specs = CONTROL_QUESTIONS
+    if args.question_id is not None:
+        specs = [q for q in CONTROL_QUESTIONS if q["id"] == args.question_id]
+        if not specs:
+            raise SystemExit(f"Вопрос с id={args.question_id} не найден")
 
-    print(f"\n  Запуск бенчмарка: {len(CONTROL_QUESTIONS)} вопросов…\n")
-    results = run_benchmark(agent)
-    print_report(results)
+    print(
+        f"\n  Инициализация RagAgent (strategy={args.strategy}, "
+        f"top_k_before={args.top_k_before}, top_k_after={args.top_k}, "
+        f"threshold={args.threshold})…"
+    )
+    agent = RagAgent(
+        strategy=args.strategy,
+        top_k=args.top_k,
+        top_k_before=args.top_k_before,
+        similarity_threshold=args.threshold,
+        verbose=True,
+    )
+
+    print(f"\n  Запуск бенчмарка: {len(specs)} вопросов…\n")
+    if args.modes:
+        results = run_modes_benchmark(agent, specs=specs)
+        print_modes_report(results)
+    else:
+        results = run_benchmark(agent, specs=specs)
+        print_report(results)
 
 
 if __name__ == "__main__":

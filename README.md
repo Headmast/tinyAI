@@ -343,6 +343,29 @@ news-agent> models                    # доступные модели
 
 ---
 
+## Task 23 — Улучшенный RAG (rewrite + reranking)
+
+Добавлен второй этап после retrieval:
+
+- query rewrite (опционально)
+- similarity threshold filter
+- reranking отдельной моделью
+- сравнение 4 режимов качества
+
+Быстрый запуск:
+
+```bash
+# Сравнение 4 режимов на 10 контрольных вопросах
+python -m rag.benchmark --modes --strategy structure --top-k-before 10 --top-k 5 --threshold 0.30
+
+# Точечный вопрос через RagAgent
+python -m rag.rag_agent "Как устроен pipeline TinyAI?" --top-k-before 10 --top-k 5 --threshold 0.30
+```
+
+Документация задачи: `docs/tasks/TASK23_README.md`
+
+---
+
 ## Тестирование
 
 ```bash

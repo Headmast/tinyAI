@@ -25,12 +25,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from rag.search import search as rag_search
 from rag import SearchResult
+from rag.query_rewrite import QueryRewriter, DEFAULT_REWRITE_MODEL
+from rag.reranker import LLMReranker, DEFAULT_RERANKER_MODEL
 
 load_dotenv()
 
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "zai-org/GLM-4.7")
 DEFAULT_BASE_URL = os.getenv("BASE_URL", "https://foundation-models.api.cloud.ru/v1")
 DEFAULT_INDEX_DIR = Path(__file__).parent.parent / "rag_data"
+DEFAULT_REWRITE_ENABLED = True
+DEFAULT_RERANK_ENABLED = True
+DEFAULT_TOP_K_BEFORE = 10
+DEFAULT_TOP_K_AFTER = 5
+DEFAULT_SIMILARITY_THRESHOLD = 0.30
 
 _SYSTEM_NO_RAG = (
     "Ты — ассистент, помогающий разобраться в устройстве проекта TinyAI. "
@@ -56,7 +63,12 @@ class RagAgent:
         model:       название LLM-модели
         index_dir:   директория с FAISS-индексом и SQLite-базой
         strategy:    стратегия RAG-поиска ('fixed_size', 'structure' или None — оба)
-        top_k:       количество чанков для RAG-контекста
+        top_k:       legacy-параметр (количество чанков после rerank/filter)
+        top_k_before: количество кандидатов до rerank/filter
+        top_k_after: количество результатов после rerank/filter
+        similarity_threshold: порог similarity для отсечения нерелевантных результатов
+        enable_query_rewrite: включить rewrite перед retrieval
+        enable_rerank: включить второй этап rerank
         temperature: температура генерации
     """
 
@@ -66,6 +78,13 @@ class RagAgent:
         index_dir: str | Path = DEFAULT_INDEX_DIR,
         strategy: Optional[str] = "structure",
         top_k: int = 5,
+        top_k_before: int = DEFAULT_TOP_K_BEFORE,
+        top_k_after: Optional[int] = None,
+        similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+        enable_query_rewrite: bool = DEFAULT_REWRITE_ENABLED,
+        enable_rerank: bool = DEFAULT_RERANK_ENABLED,
+        rewrite_model: str = DEFAULT_REWRITE_MODEL,
+        reranker_model: str = DEFAULT_RERANKER_MODEL,
         temperature: float = 0.7,
         verbose: bool = False,
     ) -> None:
@@ -73,6 +92,13 @@ class RagAgent:
         self.index_dir = Path(index_dir)
         self.strategy = strategy
         self.top_k = top_k
+        self.top_k_before = top_k_before
+        self.top_k_after = top_k_after if top_k_after is not None else top_k
+        self.similarity_threshold = similarity_threshold
+        self.enable_query_rewrite = enable_query_rewrite
+        self.enable_rerank = enable_rerank
+        self.rewrite_model = rewrite_model
+        self.reranker_model = reranker_model
         self.temperature = temperature
         self.verbose = verbose
 
@@ -83,6 +109,18 @@ class RagAgent:
             )
 
         self.client = OpenAI(base_url=DEFAULT_BASE_URL, api_key=api_key)
+        self.query_rewriter = QueryRewriter(
+            client=self.client,
+            model=self.rewrite_model,
+            enabled=self.enable_query_rewrite,
+            verbose=self.verbose,
+        )
+        self.reranker = LLMReranker(
+            client=self.client,
+            model=self.reranker_model,
+            enabled=self.enable_rerank,
+            verbose=self.verbose,
+        )
 
     # ── Публичный интерфейс ───────────────────────────────────────────────────
 
@@ -125,6 +163,8 @@ class RagAgent:
         question: str,
         top_k: Optional[int] = None,
         stream: bool = False,
+        enable_query_rewrite: Optional[bool] = None,
+        enable_rerank: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Поиск релевантных чанков → инжекция контекста → запрос к LLM.
@@ -132,14 +172,29 @@ class RagAgent:
         Returns:
             dict с ключами: answer, sources, chunks_used, token_usage, elapsed_ms, mode
         """
-        k = top_k or self.top_k
+        k = top_k if top_k is not None else self.top_k_after
+        use_rewrite = (
+            self.enable_query_rewrite
+            if enable_query_rewrite is None
+            else enable_query_rewrite
+        )
+        use_rerank = self.enable_rerank if enable_rerank is None else enable_rerank
+
+        original_query = question
+        rewritten_query = question
+        if use_rewrite:
+            rewritten_query = self.query_rewriter.rewrite(question)
 
         # Поиск
         results: List[SearchResult] = rag_search(
-            query=question,
+            query=rewritten_query,
             top_k=k,
             strategy=self.strategy,
             index_dir=self.index_dir,
+            top_k_before=self.top_k_before,
+            top_k_after=k,
+            similarity_threshold=self.similarity_threshold,
+            reranker=self.reranker if use_rerank else None,
         )
 
         # Строим контекст
@@ -191,6 +246,13 @@ class RagAgent:
             "token_usage": token_usage,
             "elapsed_ms": round(elapsed_ms, 1),
             "mode": "rag",
+            "original_query": original_query,
+            "rewritten_query": rewritten_query,
+            "rewrite_applied": use_rewrite and rewritten_query != original_query,
+            "rerank_applied": use_rerank,
+            "top_k_before": self.top_k_before,
+            "top_k_after": k,
+            "similarity_threshold": self.similarity_threshold,
         }
 
     def compare(self, question: str, stream: bool = False) -> Dict[str, Any]:
@@ -204,6 +266,35 @@ class RagAgent:
             "question": question,
             "no_rag": self.ask_without_rag(question, stream=stream),
             "rag": self.ask_with_rag(question, stream=stream),
+        }
+
+    def compare_modes(self, question: str) -> Dict[str, Any]:
+        """
+        Сравнение 4 режимов retrieval-пайплайна:
+        baseline / rewrite_only / rerank_only / combined.
+        """
+        return {
+            "question": question,
+            "baseline": self.ask_with_rag(
+                question,
+                enable_query_rewrite=False,
+                enable_rerank=False,
+            ),
+            "rewrite_only": self.ask_with_rag(
+                question,
+                enable_query_rewrite=True,
+                enable_rerank=False,
+            ),
+            "rerank_only": self.ask_with_rag(
+                question,
+                enable_query_rewrite=False,
+                enable_rerank=True,
+            ),
+            "combined": self.ask_with_rag(
+                question,
+                enable_query_rewrite=True,
+                enable_rerank=True,
+            ),
         }
 
     # ── Внутренние методы ─────────────────────────────────────────────────────
@@ -340,9 +431,25 @@ def main() -> None:
                         help="Стратегия RAG-поиска (default: structure)")
     parser.add_argument("--top-k", type=int, default=5,
                         help="Количество чанков для контекста (default: 5)")
+    parser.add_argument("--top-k-before", type=int, default=DEFAULT_TOP_K_BEFORE,
+                        help="Кандидаты до filter/rerank (default: 10)")
+    parser.add_argument("--threshold", type=float, default=DEFAULT_SIMILARITY_THRESHOLD,
+                        help="Порог similarity для отсечения (default: 0.30)")
+    parser.add_argument("--disable-rewrite", action="store_true",
+                        help="Отключить query rewrite")
+    parser.add_argument("--disable-rerank", action="store_true",
+                        help="Отключить второй этап rerank")
     args = parser.parse_args()
 
-    agent = RagAgent(strategy=args.strategy, top_k=args.top_k, verbose=True)
+    agent = RagAgent(
+        strategy=args.strategy,
+        top_k=args.top_k,
+        top_k_before=args.top_k_before,
+        similarity_threshold=args.threshold,
+        enable_query_rewrite=not args.disable_rewrite,
+        enable_rerank=not args.disable_rerank,
+        verbose=True,
+    )
     result = agent.compare(args.question)
 
     print("\n" + "═" * 70)

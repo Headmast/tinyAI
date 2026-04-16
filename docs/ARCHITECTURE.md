@@ -18,6 +18,7 @@
 9. [Конфигурация и зависимости](#9-конфигурация-и-зависимости)
 10. [Примеры использования](#10-примеры-использования)
 11. [Известные ограничения](#11-известные-ограничения)
+12. [RAG v2: Rewrite и Reranking](#12-rag-v2-rewrite-и-reranking)
 
 ---
 
@@ -1058,4 +1059,68 @@ context = session.get_context(system_prompt, client, model)
 3. **Добавить файловые блокировки** (`fcntl.flock`) в `PostStorage` и `SessionStorage`
 4. **Персистировать `WorkingMemory`** — добавить JSON-сериализацию рядом с `LongTermMemory`
 5. **Добавить `ContextCompressor` в `JournalistAgent`** при `max_history > 20`
+
+---
+
+## 12. RAG v2: Rewrite и Reranking
+
+В RAG-модуле добавлен второй этап релевантности после первичного retrieval:
+
+1. `query rewrite` (опционально)
+2. первичный retrieval (`top_k_before`)
+3. фильтрация по `similarity_threshold`
+4. rerank отдельной моделью (опционально)
+5. финальный `top_k_after`
+
+### 12.1 Пайплайн
+
+```text
+user question
+    -> QueryRewriter.rewrite()
+    -> search(top_k_before)
+    -> similarity filter (threshold)
+    -> LLMReranker.rerank()
+    -> top_k_after
+    -> context injection in RagAgent
+```
+
+### 12.2 Новые модули
+
+| Файл | Назначение |
+|------|------------|
+| `rag/query_rewrite.py` | Переформулировка запроса перед retrieval с fallback на исходный query |
+| `rag/reranker.py` | Второй этап ранжирования кандидатов отдельной моделью + fallback |
+
+### 12.3 Расширенные параметры RagAgent
+
+| Параметр | По умолчанию | Назначение |
+|----------|---------------|------------|
+| `top_k_before` | `10` | Кандидаты до фильтрации/rerank |
+| `top_k_after` | `5` | Финальные чанки в контексте |
+| `similarity_threshold` | `0.30` | Порог отсечения нерелевантных результатов |
+| `enable_query_rewrite` | `True` | Включает rewrite запроса |
+| `enable_rerank` | `True` | Включает второй этап reranking |
+
+### 12.4 Режимы сравнения качества
+
+`RagAgent.compare_modes()` и `rag.benchmark --modes` сравнивают 4 режима:
+
+- `baseline` — без rewrite и без rerank
+- `rewrite_only` — только rewrite
+- `rerank_only` — только filter/rerank
+- `combined` — rewrite + filter/rerank
+
+Агрегируемые метрики:
+
+- `avg_keyword_hits`
+- `avg_source_precision`
+- `avg_tokens`
+- `avg_latency_ms`
+- `wins_vs_baseline`
+
+### 12.5 Fallback-логика
+
+- если rewrite вернул пустой/ошибочный ответ — используется исходный query
+- если reranker недоступен/ошибся — сохраняется порядок по similarity
+- пайплайн не падает из-за ошибок второго этапа
 6. **Заменить хранилища** на SQLite или PostgreSQL для конкурентного доступа

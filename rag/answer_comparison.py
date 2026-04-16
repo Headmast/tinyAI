@@ -15,6 +15,8 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+MODE_KEYS = ["baseline", "rewrite_only", "rerank_only", "combined"]
+
 
 # ── Одиночное сравнение ───────────────────────────────────────────────────────
 
@@ -86,6 +88,65 @@ def build_comparison(
     }
 
 
+def build_modes_comparison(
+    modes_result: Dict[str, Any],
+    question_spec: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Формирует структуру сравнения 4 RAG-режимов.
+
+    Ожидаемый формат modes_result:
+        {
+          "question": "...",
+          "baseline": {...},
+          "rewrite_only": {...},
+          "rerank_only": {...},
+          "combined": {...}
+        }
+    """
+    keywords = [kw.lower() for kw in question_spec["expected_keywords"]]
+    expected_sources = question_spec["expected_sources"]
+
+    mode_data: Dict[str, Any] = {}
+    for mode in MODE_KEYS:
+        data = modes_result.get(mode, {})
+        answer = (data.get("answer") or "").lower()
+        sources = [s.lower() for s in data.get("sources", [])]
+
+        kw_hits = sum(1 for kw in keywords if kw in answer)
+        source_hits = 0
+        for expected in expected_sources:
+            expected_lower = expected.lower()
+            if any(expected_lower in s or s in expected_lower for s in sources):
+                source_hits += 1
+
+        mode_data[mode] = {
+            "answer": data.get("answer", ""),
+            "sources": data.get("sources", []),
+            "chunks_used": data.get("chunks_used", 0),
+            "tokens_total": data.get("token_usage", {}).get("total_tokens", 0),
+            "elapsed_ms": data.get("elapsed_ms", 0.0),
+            "keyword_hits": kw_hits,
+            "source_hits": source_hits,
+        }
+
+    baseline_hits = mode_data["baseline"]["keyword_hits"]
+    wins_vs_baseline = {
+        mode: mode_data[mode]["keyword_hits"] > baseline_hits
+        for mode in MODE_KEYS
+        if mode != "baseline"
+    }
+
+    return {
+        "question_id": question_spec["id"],
+        "question": question_spec["question"],
+        "total_keywords": len(keywords),
+        "total_sources": len(expected_sources),
+        "modes": mode_data,
+        "wins_vs_baseline": wins_vs_baseline,
+    }
+
+
 # ── Агрегация метрик ──────────────────────────────────────────────────────────
 
 def compare_all(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -132,6 +193,53 @@ def compare_all(comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
         "avg_tokens_rag": avg_tokens_r,
         "avg_latency_no_rag_ms": avg_lat_nr,
         "avg_latency_rag_ms": avg_lat_r,
+    }
+
+
+def compare_modes_all(mode_comparisons: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Агрегирует метрики для 4 режимов относительно baseline."""
+    if not mode_comparisons:
+        return {}
+
+    total = len(mode_comparisons)
+    modes_agg: Dict[str, Dict[str, float]] = {}
+
+    for mode in MODE_KEYS:
+        kw_hits = [c["modes"][mode]["keyword_hits"] for c in mode_comparisons]
+        src_hits = [c["modes"][mode]["source_hits"] for c in mode_comparisons]
+        tokens = [c["modes"][mode]["tokens_total"] for c in mode_comparisons]
+        lat = [c["modes"][mode]["elapsed_ms"] for c in mode_comparisons]
+        chunks = [c["modes"][mode]["chunks_used"] for c in mode_comparisons]
+
+        src_prec = []
+        for c in mode_comparisons:
+            total_sources = c.get("total_sources", 0)
+            if total_sources > 0:
+                src_prec.append(c["modes"][mode]["source_hits"] / total_sources)
+
+        modes_agg[mode] = {
+            "avg_keyword_hits": sum(kw_hits) / total,
+            "avg_source_precision": sum(src_prec) / len(src_prec) if src_prec else 0.0,
+            "avg_tokens": sum(tokens) / total,
+            "avg_latency_ms": sum(lat) / total,
+            "avg_chunks_used": sum(chunks) / total,
+        }
+
+    wins = {
+        "rewrite_only": sum(1 for c in mode_comparisons if c["wins_vs_baseline"]["rewrite_only"]),
+        "rerank_only": sum(1 for c in mode_comparisons if c["wins_vs_baseline"]["rerank_only"]),
+        "combined": sum(1 for c in mode_comparisons if c["wins_vs_baseline"]["combined"]),
+    }
+
+    return {
+        "total_questions": total,
+        "avg_total_keywords": sum(c["total_keywords"] for c in mode_comparisons) / total,
+        "modes": modes_agg,
+        "wins_vs_baseline": {
+            "rewrite_only": {"count": wins["rewrite_only"], "rate": wins["rewrite_only"] / total},
+            "rerank_only": {"count": wins["rerank_only"], "rate": wins["rerank_only"] / total},
+            "combined": {"count": wins["combined"], "rate": wins["combined"] / total},
+        },
     }
 
 
@@ -205,3 +313,85 @@ def print_comparison_report(comparisons: List[Dict[str, Any]]) -> None:
 
     # Итоговые метрики
     print_final_summary(comparisons)
+
+
+def print_modes_summary(mode_comparisons: List[Dict[str, Any]]) -> None:
+    """Печатает итог по 4 режимам RAG."""
+    agg = compare_modes_all(mode_comparisons)
+    if not agg:
+        return
+
+    print("\n" + _SEP)
+    print("  ИТОГ: 4-режимное сравнение RAG")
+    print(_SEP)
+
+    avg_total_kw = agg["avg_total_keywords"]
+    for mode in MODE_KEYS:
+        m = agg["modes"][mode]
+        print(
+            f"  {mode:12} | keywords={m['avg_keyword_hits']:.1f}/{avg_total_kw:.1f} "
+            f"| src_precision={m['avg_source_precision'] * 100:.0f}% "
+            f"| tokens={m['avg_tokens']:.0f} "
+            f"| latency={m['avg_latency_ms']:.0f}ms"
+        )
+
+    wins = agg["wins_vs_baseline"]
+    print("  " + "─" * 78)
+    print(
+        "  Победы над baseline: "
+        f"rewrite_only={wins['rewrite_only']['count']}/{agg['total_questions']} "
+        f"({wins['rewrite_only']['rate'] * 100:.0f}%), "
+        f"rerank_only={wins['rerank_only']['count']}/{agg['total_questions']} "
+        f"({wins['rerank_only']['rate'] * 100:.0f}%), "
+        f"combined={wins['combined']['count']}/{agg['total_questions']} "
+        f"({wins['combined']['rate'] * 100:.0f}%)"
+    )
+    print(_SEP)
+
+
+def print_modes_comparison_report(mode_comparisons: List[Dict[str, Any]]) -> None:
+    """Печатает наглядное сравнение 4 режимов по каждому вопросу."""
+    if not mode_comparisons:
+        return
+
+    for c in mode_comparisons:
+        q_id = c["question_id"]
+        total_keywords = c["total_keywords"]
+        total_sources = c["total_sources"]
+        baseline_hits = c["modes"]["baseline"]["keyword_hits"]
+        combined_hits = c["modes"]["combined"]["keyword_hits"]
+        combined_delta = combined_hits - baseline_hits
+        delta_str = f"+{combined_delta}" if combined_delta > 0 else str(combined_delta)
+
+        print(f"\n{_SEP}")
+        print(f"  Q{q_id:02d}. {c['question']}")
+        print(_SEP)
+        print(
+            "  Режим         | keywords | source hits | chunks | tokens | latency | vs baseline"
+        )
+        print("  " + "─" * 78)
+
+        for mode in MODE_KEYS:
+            mode_data = c["modes"][mode]
+            if mode == "baseline":
+                verdict = "base"
+            else:
+                verdict = "win" if c["wins_vs_baseline"][mode] else "no win"
+
+            print(
+                f"  {mode:12} | "
+                f"{mode_data['keyword_hits']}/{total_keywords:>8} | "
+                f"{mode_data['source_hits']}/{total_sources:>11} | "
+                f"{mode_data['chunks_used']:>6} | "
+                f"{mode_data['tokens_total']:>6} | "
+                f"{mode_data['elapsed_ms']:>7.0f}ms | "
+                f"{verdict}"
+            )
+
+        print("  " + "─" * 78)
+        print(
+            f"  Сравнение по задаче: baseline={baseline_hits}/{total_keywords}, "
+            f"combined={combined_hits}/{total_keywords} ({delta_str})"
+        )
+
+    print_modes_summary(mode_comparisons)
