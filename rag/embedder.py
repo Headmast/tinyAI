@@ -29,11 +29,14 @@ class OpenAIEmbedder:
 
     Батчирует запросы по BATCH_SIZE элементов.
     Нормализует вектора (L2) для использования с FAISS IndexFlatIP.
+    Кэширует эмбеддинги запросов для повторных вызовов.
     """
 
-    def __init__(self, model: str = EMBEDDING_MODEL) -> None:
+    def __init__(self, model: str = EMBEDDING_MODEL, cache_size: int = 256) -> None:
         self.model = model
         self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self._query_cache: dict[str, np.ndarray] = {}
+        self._cache_size = cache_size
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:
         """
@@ -70,5 +73,14 @@ class OpenAIEmbedder:
         return arr
 
     def embed_query(self, query: str) -> np.ndarray:
-        """Генерирует эмбеддинг одного запроса. Возвращает shape (1, dim)."""
-        return self.embed_texts([query])
+        """Генерирует эмбеддинг одного запроса. Возвращает shape (1, dim). Кэширует."""
+        key = query.strip()
+        if key in self._query_cache:
+            return self._query_cache[key]
+        result = self.embed_texts([query])
+        # Evict oldest if cache full
+        if len(self._query_cache) >= self._cache_size:
+            oldest = next(iter(self._query_cache))
+            del self._query_cache[oldest]
+        self._query_cache[key] = result
+        return result
