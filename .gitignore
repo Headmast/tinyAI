@@ -68,6 +68,26 @@ test_api_log.py
 
 # Comparison output artifacts
 comparison_output.log
+
+# Backup files
+*.backup
+
+# Scheduler data (SQLite)
+scheduler_data/
+
+# RAG data (embeddings, FAISS indexes)
+rag_data/
+
+# Chat backups
+chat_backups/
+
+# Coverage reports
+htmlcov/
+.coverage
+
+# Linter / type checker caches
+.mypy_cache/
+.ruff_cache/
 chuck_comparison_output.log
 riddle_test_output.log
 chuck_norris_comparison_*.json

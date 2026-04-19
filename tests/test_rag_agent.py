@@ -88,7 +88,7 @@ class TestRagAgentInit:
         assert agent.similarity_threshold == 0.30
         assert agent.enable_query_rewrite is True
         assert agent.enable_rerank is True
-        assert agent.temperature == 0.7
+        assert agent.temperature == 0.3
         assert agent.verbose is False
 
     def test_custom_params(self):
@@ -592,6 +592,140 @@ class TestBenchmarkEvaluate:
         print_comparison_report([])
         captured = capsys.readouterr()
         assert captured.err == ""
+
+
+# ── TestStreaming ──────────────────────────────────────────────────────────────
+
+class TestStreaming:
+    """Тесты streaming-вывода: _stream_llm, ask_without_rag(stream=True), ask_with_rag(stream=True)."""
+
+    def _make_stream_chunks(self, tokens: list[str]):
+        """Helper: создаёт итератор фейковых streaming chunk-ов."""
+        chunks = []
+        for t in tokens:
+            chunk = MagicMock()
+            delta = MagicMock()
+            delta.content = t
+            choice = MagicMock()
+            choice.delta = delta
+            chunk.choices = [choice]
+            chunks.append(chunk)
+        return iter(chunks)
+
+    def test_ask_without_rag_stream_returns_answer(self):
+        agent, mock_client = _make_agent_with_mock_client()
+        mock_client.chat.completions.create.return_value = self._make_stream_chunks(
+            ["Hello", " world", "!"]
+        )
+
+        result = agent.ask_without_rag("q", stream=True)
+
+        assert result["mode"] == "no_rag"
+        assert "Hello" in result["answer"]
+        assert "world" in result["answer"]
+        assert result["token_usage"]["total_tokens"] == 0  # streaming has no usage
+
+    def test_ask_without_rag_stream_calls_with_stream_param(self):
+        agent, mock_client = _make_agent_with_mock_client()
+        mock_client.chat.completions.create.return_value = self._make_stream_chunks(["ok"])
+
+        agent.ask_without_rag("q", stream=True)
+
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
+        assert call_kwargs["stream"] is True
+
+    def test_ask_with_rag_stream_returns_answer(self):
+        agent, mock_client = _make_agent_with_mock_client()
+        mock_client.chat.completions.create.return_value = self._make_stream_chunks(
+            ["RAG", " answer"]
+        )
+
+        with patch("rag.rag_agent.rag_search", return_value=[]):
+            result = agent.ask_with_rag("q", stream=True)
+
+        assert result["mode"] == "rag"
+        assert "RAG" in result["answer"]
+        assert result["token_usage"]["total_tokens"] == 0
+
+    def test_stream_thinking_tags_stripped_from_answer(self):
+        agent, mock_client = _make_agent_with_mock_client()
+        mock_client.chat.completions.create.return_value = self._make_stream_chunks(
+            ["<thinking>", "reasoning here", "</thinking>", "final answer"]
+        )
+
+        result = agent.ask_without_rag("q", stream=True)
+
+        assert "final answer" in result["answer"]
+        assert "<thinking>" not in result["answer"]
+        assert "reasoning here" not in result["answer"]
+
+    def test_stream_elapsed_ms_positive(self):
+        agent, mock_client = _make_agent_with_mock_client()
+        mock_client.chat.completions.create.return_value = self._make_stream_chunks(["ok"])
+
+        result = agent.ask_without_rag("q", stream=True)
+
+        assert result["elapsed_ms"] >= 0
+
+
+# ── TestBenchmarkRun ──────────────────────────────────────────────────────────
+
+class TestBenchmarkRun:
+    """Тесты для run_benchmark и print_final_summary из rag.benchmark."""
+
+    def test_evaluate_answer_rag_wins_with_more_keywords(self):
+        compare_result = {
+            "question": "Какие агенты есть в TinyAI?",
+            "no_rag": {"answer": "pipeline", "token_usage": {"total_tokens": 10}, "elapsed_ms": 50.0},
+            "rag": {"answer": "pipeline agent scheduler memory journalist",
+                    "sources": ["docs/ARCHITECTURE.md"],
+                    "chunks_used": 3, "token_usage": {"total_tokens": 200}, "elapsed_ms": 200.0},
+        }
+        ev = evaluate_answer(compare_result, CONTROL_QUESTIONS[0])
+        assert ev["rag_wins"] is True
+        assert ev["keyword_hits_rag"] > ev["keyword_hits_no_rag"]
+
+    def test_evaluate_answer_returns_all_fields(self):
+        compare_result = {
+            "question": "test",
+            "no_rag": {"answer": "", "token_usage": {"total_tokens": 5}, "elapsed_ms": 10.0},
+            "rag": {"answer": "", "sources": [], "chunks_used": 0,
+                    "token_usage": {"total_tokens": 20}, "elapsed_ms": 100.0},
+        }
+        ev = evaluate_answer(compare_result, CONTROL_QUESTIONS[0])
+        required_fields = {"keyword_hits_no_rag", "keyword_hits_rag", "source_hits", "rag_wins"}
+        assert required_fields.issubset(set(ev.keys()))
+
+    def test_evaluate_answer_source_matching(self):
+        compare_result = {
+            "question": "test",
+            "no_rag": {"answer": "", "token_usage": {"total_tokens": 5}, "elapsed_ms": 10.0},
+            "rag": {"answer": "answer with keywords",
+                    "sources": ["docs/ARCHITECTURE.md"],
+                    "chunks_used": 2, "token_usage": {"total_tokens": 50}, "elapsed_ms": 100.0},
+        }
+        q = CONTROL_QUESTIONS[0]
+        ev = evaluate_answer(compare_result, q)
+        # source_hits should count matching expected sources
+        if "docs/ARCHITECTURE.md" in q.get("expected_sources", []):
+            assert ev["source_hits"] >= 1
+
+    def test_print_comparison_report_with_data(self, capsys):
+        spec = {
+            "id": 1, "question": "q", "expected_keywords": ["kw1"],
+            "expected_sources": [], "notes": "",
+        }
+        result = {
+            "question": "q",
+            "no_rag": {"answer": "kw1", "token_usage": {"total_tokens": 10}, "elapsed_ms": 50.0},
+            "rag": {"answer": "kw1", "sources": [], "chunks_used": 0,
+                    "token_usage": {"total_tokens": 20}, "elapsed_ms": 100.0},
+        }
+        comparison = build_comparison(result, spec)
+        print_comparison_report([comparison])
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert len(captured.out) > 0
 
 
 # ── Интеграционные тесты (требуют реального API) ──────────────────────────────

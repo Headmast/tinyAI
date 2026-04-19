@@ -1,6 +1,6 @@
 # TinyAI — Архитектурная документация
 
-> Версия документа: v7.0 — Task 16: MCP-интеграция  
+> Версия документа: v8.0 — Task 25+: Рефакторинг и RAG-улучшения  
 > Проект: учебный фреймворк LLM-агентов (Cloud.ru / OpenAI-совместимый API)
 
 ---
@@ -1124,3 +1124,108 @@ user question
 - если reranker недоступен/ошибся — сохраняется порядок по similarity
 - пайплайн не падает из-за ошибок второго этапа
 6. **Заменить хранилища** на SQLite или PostgreSQL для конкурентного доступа
+
+---
+
+## 13. MCP-оркестрация (Task 17–20)
+
+### 13.1 Компоненты
+
+```
+mcp_server.py               — MCP-сервер логов/памяти (9 инструментов)
+mcp_client.py               — Базовый MCP-клиент (handshake, call)
+mcp_agent.py                — MCPAgent: диалоговый агент + function calling → MCP
+mcp_registry.py             — MCPRegistry: реестр серверов, автообнаружение
+mcp_router.py               — MCPRouter: маршрутизация tool_calls к серверам
+mcp_orchestrator_agent.py   — MCPOrchestratorAgent: мульти-серверный агент
+mcp_scheduler_agent.py      — MCPSchedulerAgent: агент + планировщик
+mcp_scheduler_server.py     — MCP-сервер планировщика (8 инструментов)
+mcp_pipeline.py             — PipelineExecutor: 4-серверный пайплайн
+mcp_pipeline_bridge.py      — MCPPipelineBridge: мост к pipeline серверам
+mcp_pipeline_server.py      — Монолитный pipeline-сервер (все 4 инструмента)
+```
+
+### 13.2 Архитектурная схема MCP
+
+```
+┌─────────────────────────────────────────────────────┐
+│                MCPOrchestratorAgent                  │
+│  (chat → classify → tool_call → route → respond)    │
+├─────────────┬───────────────────────────────────────┤
+│ MCPRegistry │         MCPRouter                     │
+│  (discover) │   (name → server → call)              │
+├─────┬───────┴─────────┬──────────────┬──────────────┤
+│ mcp_server  │ mcp_scheduler │ pipeline/servers/  │
+│ (логи+память) │ (задачи)      │ (4 сервера)        │
+└─────────────┴─────────────────┴──────────────────────┘
+          JSON-RPC 2.0 по stdin/stdout (stdio)
+```
+
+### 13.3 Pipeline-сервера
+
+```
+pipeline/servers/
+  base.py              — BasePipelineServer (общий протокол)
+  search_server.py     — search: поиск по логам
+  summarize_server.py  — summarize: суммаризация через LLM
+  format_server.py     — format_content: форматирование текста
+  store_server.py      — save_to_file, save_to_db: сохранение
+```
+
+---
+
+## 14. Планировщик задач (Task 18)
+
+### 14.1 Компоненты
+
+```
+scheduler/
+  db.py          — SQLite хранилище задач (scheduler_data/scheduler.db)
+  scheduler.py   — SchedulerDaemon: фоновый поток, проверка расписания
+  tasks.py       — 4 типа задач: report, backup, cleanup, health_check
+
+scheduler_daemon.py  — Точка входа для запуска демона
+```
+
+---
+
+## 15. Intent Router (Task 21)
+
+IntentRouter — единый entry-point, классифицирующий запросы пользователя:
+
+- **Keyword matching** (мгновенно, без API)
+- **LLM fallback** (если keywords не дали результата)
+
+7 типов намерений: `generate_content`, `schedule_task`, `search_logs`,
+`memory`, `journalism`, `pipeline`, `general`.
+
+---
+
+## 16. Пакет core/ (Task 26: рефакторинг)
+
+```
+core/
+  __init__.py
+  config.py       — AppConfig: единый загрузчик конфигурации из .env
+  persistence.py  — load_json/save_json: утилиты работы с JSON-файлами
+```
+
+### 16.1 Конфигурация
+
+`core.config.get_config()` — синглтон `AppConfig`, загруженный из `.env`.
+`core.config.get_llm_client(provider)` — фабрика OpenAI клиентов ("cloud"/"openai").
+
+---
+
+## 17. Пакет mcp_package/ (Task 26: рефакторинг)
+
+Пакет-фасад, предоставляющий единую точку импорта MCP-компонентов:
+
+```python
+from mcp_package import MCPAgent, MCPRegistry, MCPRouter
+from mcp_package.pipeline import PipelineExecutor, Step
+from mcp_package.scheduler import MCPSchedulerAgent
+```
+
+Корневые модули (`mcp_agent.py`, `mcp_registry.py` и т.д.) сохранены
+для обратной совместимости.

@@ -61,42 +61,41 @@
 - `TESTING.md` - полное руководство по тестированию
 - `TEST_SUMMARY.md` - эта сводка
 
-## Статистика тестов
+## Статистика тестов (обновлено апрель 2026)
 
-### Unit-тесты (быстрые, без API)
+### Общая картина
 ```
-📊 35 тестов
-⏱️ Время: ~0.27 секунды
-✅ Прохождение: 100%
+📊 22 тестовых файла, ~800+ тестов
+⏱️ Unit-тесты: <1 секунда (mocked)
+📋 Маркеры pytest: unit, integration, api, e2e, slow
 ```
 
-### Интеграционные тесты (с реальными API)
-```
-📊 10 тестов
-⏱️ Время: ~2-3 минуты
-💰 Стоимость: минимальная (короткие запросы, режим с ограничением)
-✅ Прохождение: зависит от наличия API ключей
-```
+### Покрытие по модулям
+
+| Область | Тестовые файлы | ~Тестов |
+|---|---|---|
+| Sessions/Context | test_sessions, test_context_strategies, test_context_compressor, test_token_counter | ~200 |
+| Journalist/FSM | test_article_fsm, test_journalist_fsm, test_journalist_agent | ~190 |
+| RAG | test_rag_agent, test_rag_citations, test_rag_chunker, test_rag | ~140 |
+| News/MCP | test_news_agent, test_mcp_orchestrator, test_mcp_scheduler_agent, test_pipeline_executor | ~120 |
+| CLI/Config | test_llm_cli, test_core, test_model_parameters | ~80 |
+| Analytics | test_usage_tracker, test_analytics, test_new_features | ~120 |
 
 ## Команды для запуска
 
 ### Быстрая проверка (только unit-тесты)
 ```bash
-python3 -m pytest test_llm_cli.py test_model_parameters.py -v -m "not integration"
+pytest tests/ -v -m "not api"
 ```
 
 ### Полная проверка (включая API)
 ```bash
-python3 -m pytest test_llm_cli.py test_model_parameters.py -v
+pytest tests/ -v
 ```
 
-### Проверка конкретной модели
+### Только RAG-тесты
 ```bash
-# GLM-4.7-Flash
-python3 -m pytest test_model_parameters.py::TestShortPrompts::test_glm_flash_short_prompts -v -s
-
-# GPT-5.4 Mini
-python3 -m pytest test_model_parameters.py::TestShortPrompts::test_gpt54_mini_short_prompts -v -s
+pytest tests/test_rag_agent.py tests/test_rag_citations.py tests/test_rag.py -v
 ```
 
 ## Ключевые улучшения

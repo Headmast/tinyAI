@@ -1,219 +1,112 @@
 # Руководство по тестированию
 
-## Обзор тестов
+## Запуск тестов
 
-Проект содержит три набора тестов:
-
-### 1. **test_llm_cli.py** - Unit-тесты
-Базовые тесты функциональности без реальных API запросов.
-
-**Что проверяется:**
-- Наличие всех 5 моделей (GLM-4.7-Flash, GLM-4.7, GPT-5 Nano, GPT-5.4, GPT-5.4 Mini)
-- Корректность ценообразования
-- Параметры температуры для каждой модели
-- Обработка параметра `temperature` (gpt-5-nano не поддерживает)
-- Все 6 режимов работы
-- Метапромптинг
-
-**Запуск:**
 ```bash
-python3 -m pytest test_llm_cli.py -v
+# Все тесты без API (рекомендуется)
+python3 -m pytest tests/ -m "not api and not integration" -v
+
+# Через Makefile
+make test
+
+# С покрытием кода
+make test-cov
+
+# Конкретный файл
+python3 -m pytest tests/test_rag_chunker.py -v
+
+# Все тесты (включая API — нужен ключ)
+python3 -m pytest tests/ -v
 ```
 
-### 2. **test_model_parameters.py** - Интеграционные тесты
-Проверка реальных API запросов с короткими промптами.
+## Маркеры pytest
 
-**Что проверяется:**
-- Параметры всех моделей
-- Температура (0, 0.5, 0.75, 1.0) для GLM
-- Короткие запросы для всех моделей
-- Расчёт стоимости
-- Работоспособность всех доступных моделей
+| Маркер | Описание | Требует API? |
+|--------|----------|-------------|
+| `unit` | Чистые юнит-тесты | Нет |
+| `integration` | Файловые операции | Нет |
+| `api` | Реальные API-вызовы | Да |
+| `e2e` | End-to-end | Да |
+| `slow` | Медленные (> 5 сек) | Зависит |
 
-**Запуск только unit-тестов (быстро):**
-```bash
-python3 -m pytest test_model_parameters.py -v -m "not integration"
-```
+## Структура тестов (22 файлов)
 
-**Запуск с интеграционными тестами (требует API ключи):**
-```bash
-python3 -m pytest test_model_parameters.py -v
-```
+### Unit-тесты (моки, без API)
 
-**Запуск конкретного теста:**
-```bash
-# Только GLM тесты
-python3 -m pytest test_model_parameters.py::TestShortPrompts::test_glm_flash_short_prompts -v -s
+| Файл | Тестирует |
+|------|-----------|
+| `test_analytics.py` | Аналитика: категоризация, UsageTracker |
+| `test_article_fsm.py` | FSM статей: фазы, переходы, состояние |
+| `test_context_compressor.py` | Компрессия контекста, статистика |
+| `test_context_strategies.py` | Стратегии: sliding, sticky_facts, branching |
+| `test_core.py` | **НОВЫЙ** — core.config, core.persistence |
+| `test_intent_router.py` | **НОВЫЙ** — классификация намерений |
+| `test_journalist_agent.py` | Инварианты, prompt injection |
+| `test_journalist_fsm.py` | Workflow, переходы, pause/resume |
+| `test_llm_cli.py` | CLI: режимы, модели, стоимость |
+| `test_mcp_orchestrator.py` | Registry, Router, мульти-сервер |
+| `test_new_features.py` | PipelineTemplates, IntentRouter |
+| `test_news_agent.py` | Роли, инструменты, pipeline |
+| `test_personalization.py` | UserProfile, ProfileManager |
+| `test_pipeline_executor.py` | 4-серверный MCP pipeline |
+| `test_rag_chunker.py` | **НОВЫЙ** — chunker: размер, overlap |
+| `test_rag_citations.py` | Парсер цитат, edge cases |
+| `test_sessions.py` | ConversationSession, SessionStorage |
+| `test_token_counter.py` | TokenCounter, Budget, Tracker |
+| `test_usage_tracker.py` | RequestRecord, UsageTracker |
 
-# Только GPT-5.4 Mini тесты
-python3 -m pytest test_model_parameters.py::TestShortPrompts::test_gpt54_mini_short_prompts -v -s
+### Тесты с API (маркер `@pytest.mark.api`)
 
-# Тесты температуры
-python3 -m pytest test_model_parameters.py::TestTemperatureVariations -v -s
-```
+| Файл | Тестирует |
+|------|-----------|
+| `test_model_parameters.py` | Параметры реальных моделей |
+| `test_rag.py` | Embedder, Search (имеет и unit-тесты) |
+| `test_rag_agent.py` | RagAgent с реальными запросами (имеет и unit-тесты) |
 
-### 3. **test_temperature.py** и **test_gpt54_temperature.py**
-Специализированные скрипты для сравнения температур.
+### Smoke-тесты (ручной запуск, не pytest)
 
-**Запуск:**
-```bash
-# Для GLM моделей
-python3 test_temperature.py
+| Файл | Описание |
+|------|----------|
+| `smoke_api_log.py` | Один API-вызов GLM-4.7, полный вывод |
+| `smoke_gpt54_temperature.py` | GPT-5.4 с 4 температурами |
+| `smoke_temperature.py` | GLM-4.7-Flash температуры |
+| `smoke_mcp_server_day17.py` | MCP-сервер e2e через subprocess |
 
-# Для GPT-5.4
-python3 test_gpt54_temperature.py
-```
+## Мок-стратегия
 
-## Требования
+Большинство тестов используют `unittest.mock`:
 
-### API Ключи
-Создайте файл `.env` с ключами:
-```env
-CLOUD_API_KEY=your_cloud_ru_key_here
-OPENAI_API_KEY=your_openai_key_here
-```
-
-### Зависимости
-```bash
-pip install pytest openai python-dotenv
-```
-
-## Структура тестов
-
-### TestModels
-- ✅ Проверка количества моделей (5)
-- ✅ Наличие ценообразования у всех моделей
-- ✅ Все модели присутствуют
-- ✅ GLM модели бесплатные
-- ✅ Корректные ID и провайдеры
-- ✅ GPT-5.4 Mini дешевле GPT-5.4
-
-### TestTemperatureParameters
-- ✅ Все режимы имеют temperature = 0.7
-- ✅ Температура в валидном диапазоне (0-2.0)
-- ✅ gpt-5-nano не поддерживает temperature
-- ✅ Остальные модели сохраняют temperature
-
-### TestShortPrompts (интеграционные)
-Короткие тестовые промпты:
-- "Что такое AI?"
-- "2+2=?"
-- "Назови цвет неба"
-- "Столица России?"
-- "Привет!"
-
-**Проверяется:**
-- Модель отвечает
-- Usage статистика корректна
-- Стоимость рассчитывается правильно
-- Ответ не пустой
-
-### TestTemperatureVariations (интеграционные)
-Проверка температур: 0, 0.5, 0.75, 1.0
-
-## Результаты тестов
-
-### Unit-тесты (без API)
-```
-✅ 30 тестов в test_llm_cli.py
-✅ 5 тестов в test_model_parameters.py (unit)
-⏱️ Время выполнения: ~0.3 секунды
-```
-
-### Интеграционные тесты (с API)
-```
-✅ 10 тестов с реальными API запросами
-⏱️ Время выполнения: ~2-3 минуты
-💰 Стоимость: минимальная (короткие запросы)
-```
-
-## Добавленные модели
-
-### GPT-5.4 Mini
 ```python
-{
-    "name": "GPT-5.4 Mini",
-    "prompt_price": 0.0001,
-    "completion_price": 0.0006,
-    "description": "Облегченная версия GPT-5.4, оптимальная для большинства задач",
-    "provider": "openai",
-    "id": 5
-}
+from unittest.mock import MagicMock, patch
+
+# Мок OpenAI-клиента
+mock_client = MagicMock()
+mock_client.chat.completions.create.return_value = MagicMock(
+    choices=[MagicMock(message=MagicMock(content="ответ"))]
+)
 ```
 
-**Особенности:**
-- Дешевле GPT-5.4 в ~25 раз по prompt, ~25 раз по completion
-- Поддерживает temperature
-- Поддерживает streaming
-- Оптимальна для коротких и средних запросов
+Общие фикстуры доступны в `tests/conftest.py`:
+- `mock_openai_client` — готовый мок LLM-клиента
+- `mock_env_keys` — тестовые API-ключи в env
+- `temp_data_dir` — временная директория
+- `sample_messages` — типовой диалог
 
-## Параметры моделей
+Фабрики данных в `tests/factories.py`:
+- `make_message()`, `make_conversation()`
+- `make_journalist_task()`, `make_rag_document()`
 
-| Модель | Temperature | Max Tokens | Streaming | Thinking |
-|--------|-------------|------------|-----------|----------|
-| GLM-4.7-Flash | ✅ 0-1.0 | 120000 | ✅ | ✅ |
-| GLM-4.7 | ✅ 0-1.0 | 120000 | ✅ | ✅ |
-| GPT-5 Nano | ❌ | 120000 | ✅ | ❌ |
-| GPT-5.4 | ✅ 0-1.0 | 120000 | ✅ | ❌ |
-| GPT-5.4 Mini | ✅ 0-1.0 | 120000 | ✅ | ❌ |
-
-## Troubleshooting
-
-### Ошибка: "max_tokens limit reached"
-**Решение:** Используйте режим 3 (с ограничением длины) для коротких запросов:
-```python
-modes = get_available_modes(model_name)
-mode = modes[2]  # Режим с max_completion_tokens=100
-```
-
-### Ошибка: "temperature not supported"
-**Причина:** gpt-5-nano не поддерживает параметр temperature.
-**Решение:** Функция `get_model_params()` автоматически удаляет этот параметр.
-
-### Пропуск интеграционных тестов
-Если нет API ключа, тесты автоматически пропускаются с `pytest.skip()`.
-
-## Рекомендации
-
-1. **Для разработки:** Запускайте только unit-тесты (`-m "not integration"`)
-2. **Перед коммитом:** Запускайте полный набор тестов
-3. **Для CI/CD:** Используйте mock-объекты или отдельные тестовые ключи
-4. **Экономия:** Интеграционные тесты используют режим с ограничением длины (100 токенов)
-
-## Статистика
-
-```
-📊 Всего тестов: 45
-   ├─ Unit-тесты: 35 (быстрые)
-   └─ Интеграционные: 10 (с API)
-
-✅ Покрытие:
-   ├─ Модели: 100% (5/5)
-   ├─ Режимы: 100% (6/6)
-   ├─ Параметры: 100%
-   └─ Температуры: 100%
-```
-
----
-
-## RAG v2: rewrite + reranking
-
-Для проверки улучшенного RAG (Task 23) используйте offline-набор:
+## Покрытие кода
 
 ```bash
-pytest tests/test_rag.py tests/test_rag_agent.py -m "not api" -v
+make test-cov
+# Отчёт: htmlcov/index.html
 ```
 
-Что проверяется:
+## Написание новых тестов
 
-- пороговая фильтрация `similarity_threshold`
-- `top_k_before` и `top_k_after`
-- reranker-пересортировка кандидатов
-- включение/выключение query rewrite и rerank в `RagAgent`
-- сравнение 4 режимов (`baseline`, `rewrite_only`, `rerank_only`, `combined`)
-
-Smoke-команда для сравнительного запуска режимов:
-
-```bash
-python -m rag.benchmark --modes --strategy structure --top-k-before 10 --top-k 5 --threshold 0.30
-```
+1. Файл называется `test_*.py` в директории `tests/`
+2. Классы — `Test*`, методы — `test_*`
+3. API-зависимые тесты помечаются `@pytest.mark.api`
+4. Используй фикстуры из `conftest.py`
+5. Моки вместо реальных API-вызовов для unit-тестов

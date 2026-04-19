@@ -14,6 +14,7 @@ CLI:
 from __future__ import annotations
 
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -583,9 +584,10 @@ class RagAgent:
                 return client.chat.completions.create(**params)
             except Exception as exc:
                 if attempt < 2:
+                    delay = min(2 ** attempt + random.uniform(0, 1), 30)
                     if self.verbose:
-                        print(f"  API error: {exc}. Retry in 2s...")
-                    time.sleep(2)
+                        print(f"  API error: {exc}. Retry in {delay:.1f}s...")
+                    time.sleep(delay)
                 else:
                     raise
 

@@ -36,23 +36,34 @@ class QueryRewriter:
         self.model = model
         self.enabled = enabled
         self.verbose = verbose
+        self._cache: dict[str, str] = {}
 
     def rewrite(self, query: str) -> str:
         """
         Переписывает query для поиска.
 
         Возвращает исходный query, если rewrite отключен или произошла ошибка.
+        Кэширует результат, чтобы не повторять одинаковые API-вызовы.
         """
         if not self.enabled:
             return query
 
+        if query in self._cache:
+            if self.verbose:
+                print(f"  [rewrite] cache hit for: {query[:50]}")
+            return self._cache[query]
+
         raw = self._call_model(query)
         rewritten = self._extract_rewrite(raw)
         if not rewritten:
-            return self._heuristic_rewrite(query)
-        if self._normalize_query(rewritten) == self._normalize_query(query):
-            return self._heuristic_rewrite(query)
-        return rewritten
+            result = self._heuristic_rewrite(query)
+        elif self._normalize_query(rewritten) == self._normalize_query(query):
+            result = self._heuristic_rewrite(query)
+        else:
+            result = rewritten
+
+        self._cache[query] = result
+        return result
 
     def _call_model(self, query: str) -> str:
         messages = [

@@ -98,6 +98,353 @@ AI-агент для автоматической генерации новос�
 
 ## Что реализовано
 - `TokenCounter` — точный подсчёт через tiktoken, fallback chars÷4
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `news_agent/token_counter.py` | TokenCounter + overflow detection |
+
+## Тесты
+- `tests/test_token_counter.py` — подсчёт, лимиты, overflow
+
+---
+
+# День 9 — Компрессия контекста
+
+## Требования
+Сжатие диалогового контекста при приближении к лимиту окна.
+
+## Что реализовано
+- `ContextCompressor` — LLM-based summarization старых сообщений
+- Progressive compression: compress older messages first
+- Порог срабатывания: 80% от context window
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `news_agent/context_compressor.py` | Компрессия контекста |
+
+## Тесты
+- `tests/test_context_compressor.py` — сжатие, пороги
+
+---
+
+# День 10 — Стратегии управления контекстом
+
+## Требования
+Несколько стратегий управления контекстным окном.
+
+## Что реализовано
+- Стратегии: `truncate`, `summarize`, `sliding_window`
+- Конфигурируемые пороги и размер окна
+- Автоматический выбор стратегии по размеру контекста
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `news_agent/context_strategies.py` | Стратегии контекста |
+
+## Тесты
+- `tests/test_context_strategies.py` — все стратегии
+
+---
+
+# День 11 — Memory Agent
+
+## Требования
+Агент с 3-слойной памятью: short-term, working, long-term.
+
+## Что реализовано
+- `MemoryAgent` — трёхуровневая память
+- short-term: текущий диалог
+- working: переменные сессии
+- long-term: персистентное хранилище (JSON)
+- Автоматическое перемещение между слоями
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `memory_agent/agent.py` | MemoryAgent с 3-layer memory |
+
+## Тесты
+- `tests/test_memory_agent.py` — все слои памяти
+
+---
+
+# День 12 — Персонализация
+
+## Требования
+Персонализированные ответы на основе профиля пользователя.
+
+## Что реализовано
+- `PersonalizedAgent` — расширение MemoryAgent с user profile
+- Стиль ответов адаптируется к предпочтениям
+- Профиль обновляется автоматически из контекста
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `memory_agent/personalized_agent.py` | Персонализация |
+
+## Тесты
+- `tests/test_personalization.py` — профиль, стиль
+
+---
+
+# День 13 — Journalist FSM Agent
+
+## Требования
+Агент-журналист на конечном автомате (FSM) с 4 типами статей.
+
+## Что реализовано
+- `JournalistFSMAgent` — FSM-based workflow
+- 4 типа: ARTICLE, NEWS_RESEARCH, REVIEW, INTERVIEW
+- Состояния: PLANNING → RESEARCH → WRITING → EDITING → DONE
+- Guards: проверки перед переходом, pause/resume
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `journalist_agent/fsm_agent.py` | FSM Agent |
+| `journalist_agent/workflow.py` | Workflow definitions |
+| `journalist_agent/step_prompts.py` | Промпты по шагам |
+
+## Тесты
+- `tests/test_journalist_fsm.py` — FSM, переходы, guards
+- `tests/test_article_fsm.py` — ARTICLE workflow
+
+---
+
+# День 14 — Инварианты и streaming
+
+## Требования
+Инварианты FSM + streaming-вывод для всех LLM-вызовов.
+
+## Что реализовано
+- `invariants.json` — конфигурация инвариантов FSM
+- Streaming: `<thinking>` tag handling, real-time output
+- Проверка инвариантов на каждом переходе
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `journalist_agent/invariants.py` | Проверка инвариантов |
+| `journalist_agent/invariants.json` | Конфигурация |
+
+## Тесты
+- `tests/test_journalist_agent.py` — инварианты, streaming
+
+---
+
+# День 15 — 3 темы × FSM
+
+## Требования
+Демонстрация FSM-агента на трёх разных темах с автоматическим логированием.
+
+## Что реализовано
+- `run_3topics.py` — запуск 3 статей последовательно
+- Автологирование в `journalist_tasks_demo/`
+- CLI-аргументы: `--task`, `--model`, `--max-tokens`, `--no-log`
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `demos/run_3topics.py` | 3 темы × FSM demo |
+
+---
+
+# День 16 — MCP-сервер и клиент
+
+## Требования
+MCP (Model Context Protocol) сервер и клиент для управления логами и памятью.
+
+## Что реализовано
+- `mcp_server.py` — 9 инструментов (list_logs, read_log, search_logs, ...)
+- `mcp_client.py` — подключение к серверу, вызов инструментов
+- JSON-RPC совместимый протокол
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `mcp_server.py` | MCP Server (9 tools) |
+| `mcp_client.py` | MCP Client |
+
+---
+
+# День 17 — MCP Agent (function calling)
+
+## Требования
+Агент с function calling через MCP.
+
+## Что реализовано
+- `MCPAgent` — function calling loop с MCP Bridge
+- Tool definitions → LLM выбирает инструмент → выполнение → результат
+- Инструменты: save_memory, delete_memory_key, get_conversation_summary
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `mcp_agent.py` | MCPAgent |
+
+---
+
+# День 18 — Планировщик задач
+
+## Требования
+Планировщик периодических задач через MCP.
+
+## Что реализовано
+- `MCPSchedulerAgent` — агент с 7+ tool definitions
+- Задачи: chat_collector, chat_backup, summary_generator, reminder
+- `MCPSchedulerBridge` — мост к scheduler server
+- Tool routing: scheduler tools → sched_bridge, logs → logs_bridge
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `mcp_scheduler_agent.py` | MCPSchedulerAgent |
+| `mcp_scheduler_server.py` | Scheduler MCP Server |
+| `scheduler/` | Scheduler core |
+
+---
+
+# День 19 — Расписание + daemon
+
+## Требования
+Фоновый daemon для автоматического выполнения задач.
+
+## Что реализовано
+- `scheduler_daemon.py` — background daemon
+- Периодическое выполнение: cron-like intervals
+- Auto-restart, logging
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `scheduler_daemon.py` | Scheduler Daemon |
+
+---
+
+# День 20 — MCP-оркестратор
+
+## Требования
+Координация нескольких MCP-серверов.
+
+## Что реализовано
+- `MCPOrchestratorAgent` — мульти-сервер оркестрация
+- `MCPRegistry` — регистрация серверов
+- `MCPRouter` — маршрутизация вызовов к нужному серверу
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `mcp_orchestrator_agent.py` | Orchestrator Agent |
+| `mcp_registry.py` | MCPRegistry |
+| `mcp_router.py` | MCPRouter |
+
+## Тесты
+- `tests/test_mcp_orchestrator.py` — оркестрация, маршрутизация
+
+---
+
+# День 21 — IntentRouter
+
+## Требования
+Маршрутизация запросов к нужному агенту.
+
+## Что реализовано
+- `IntentRouter` — keyword matching + LLM fallback
+- Категории: news, journalist, memory, scheduler, rag, general
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `intent_router.py` | IntentRouter |
+
+---
+
+# День 22 — RAG Agent (dual-mode)
+
+## Требования
+RAG-агент с двумя режимами и бенчмарком.
+
+## Что реализовано
+- `RagAgent` — dual-mode: ask_without_rag / ask_with_rag
+- Streaming вывод с `<thinking>` tag handling
+- `compare()` — параллельный запуск обоих режимов
+- `benchmark.py` — 10 контрольных вопросов, keyword/source metrics
+- `answer_comparison.py` — build_comparison, compare_all, modes comparison
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `rag/rag_agent.py` | RagAgent |
+| `rag/benchmark.py` | 10 контрольных вопросов + evaluate |
+| `rag/answer_comparison.py` | Сравнение ответов |
+| `demos/demo_rag_agent.py` | Streaming demo |
+
+## Тесты
+- `tests/test_rag_agent.py` — dual-mode, compare, answer comparison, benchmark
+
+---
+
+# День 23 — Query Rewrite + Reranking
+
+## Требования
+Улучшение retrieval через query rewrite и reranking.
+
+## Что реализовано
+- `QueryRewriter` — LLM-based перефразирование запроса
+- `LLMReranker` — повторное ранжирование результатов через LLM
+- `compare_modes()` — 4 конфигурации: baseline / rewrite / rerank / combined
+- Similarity threshold filter
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `rag/query_rewrite.py` | QueryRewriter |
+| `rag/reranker.py` | LLMReranker |
+
+---
+
+# День 24 — RAG с цитатами
+
+## Требования
+Inline-цитаты с верификацией и anti-hallucination guard.
+
+## Что реализовано
+- `ask_with_citations()` — RAG + цитаты + SourceRef
+- `citation_parser.py` — парсинг и нормализация цитат
+- Auto-извлечение цитат из top-чанков (fallback)
+- Confidence threshold — отклоняет нерелевантные ответы
+- Quote verification через normalized text matching
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `rag/citation_parser.py` | Парсер цитат |
+| `rag/rag_agent.py` | ask_with_citations |
+
+## Тесты
+- `tests/test_rag_citations.py` — парсинг, верификация, fallback
+
+---
+
+# День 25 — Fast Mode RAG + MathReranker
+
+## Требования
+Ускоренный RAG без LLM-reranker.
+
+## Что реализовано
+- `rag_chat_agent.py` — интерактивный RAG-чат
+- MathReranker — TF-IDF + BM25 + Score Fusion (без LLM)
+- Значительно быстрее LLM-reranker при сопоставимом качестве
+
+## Ключевые файлы
+| Файл | Роль |
+|------|------|
+| `rag/rag_chat_agent.py` | RAG Chat Agent |
+| `rag/math_reranker.py` | MathReranker |
 - `DialogTokenTracker` — отслеживание на каждом ходе, таблица роста
 - `TokenBudget` — детекция overflow до вызова API
 - `count_request_breakdown()` — детальная разбивка токенов

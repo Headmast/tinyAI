@@ -1,8 +1,8 @@
-# TinyAI — AI Курс (17 дней)
+# TinyAI — AI Курс (25 задач)
 
-Учебный проект: 17 дней от базового промптинга до MCP-интеграции с инструментами для управления логами и памятью.
+Учебный проект: 25 задач от базового промптинга до RAG-системы с MCP-оркестрацией, планировщиком и бенчмарками.
 
-> **Стек:** Python 3.9+ · Cloud.ru Foundation Models API · `zai-org/GLM-4.7` (reasoning) · OpenAI-compatible SDK · MCP (Model Context Protocol)
+> **Стек:** Python 3.9+ · Cloud.ru Foundation Models API · `zai-org/GLM-4.7` (reasoning) · OpenAI-compatible SDK · MCP (Model Context Protocol) · FAISS · tiktoken
 
 ---
 
@@ -366,6 +366,46 @@ python -m rag.rag_agent "Как устроен pipeline TinyAI?" --top-k-before 
 
 ---
 
+## Task 22 — RAG Agent (dual-mode + бенчмарк)
+
+Агент с двумя режимами: без RAG и с RAG. Streaming-вывод, бенчмарк на 10 контрольных вопросах.
+
+```bash
+# Streaming demo (3 вопроса)
+python3 demos/demo_rag_agent.py
+
+# Полный бенчмарк (10 вопросов)
+python3 demos/demo_rag_agent.py --full
+```
+
+Режимы: `ask_without_rag`, `ask_with_rag`, `compare`, `compare_modes` (4 конфигурации)
+
+---
+
+## Task 24 — RAG с цитатами
+
+Режим `ask_with_citations` — inline-цитаты, верификация, anti-hallucination guard:
+
+- Автоматическое извлечение цитат из top-чанков
+- Верификация цитат через normalized text matching
+- Порог уверенности (`confidence_threshold`) — отклоняет нерелевантные результаты
+
+```bash
+python3 -m rag.rag_agent "Что такое MCP?" --citations
+```
+
+---
+
+## Task 25 — Fast Mode RAG + MathReranker
+
+Ускоренный режим без LLM-reranker: математический reranker (TF-IDF + BM25 + Score Fusion).
+
+```bash
+python3 -m rag.rag_chat_agent
+```
+
+---
+
 ## Тестирование
 
 ```bash
@@ -392,6 +432,12 @@ pytest -v -s tests/test_journalist_fsm.py
 | `test_analytics.py` | Аналитика и метрики |
 | `test_context_strategies.py` | Стратегии управления контекстом |
 | `test_token_counter.py` | Подсчёт токенов |
+| `test_rag_agent.py` | RagAgent: dual-mode, compare, answer comparison, бенчмарк |
+| `test_rag_citations.py` | Цитаты, парсинг, верификация |
+| `test_rag_chunker.py` | Стратегии чанкинга |
+| `test_rag.py` | Поиск, embeddings, индексация |
+| `test_mcp_orchestrator.py` | MCPOrchestrator, маршрутизация |
+| `test_mcp_scheduler_agent.py` | MCPSchedulerAgent, tool routing |
 
 ---
 

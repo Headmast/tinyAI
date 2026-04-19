@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections import OrderedDict
 from typing import List
 
 import numpy as np
@@ -35,7 +36,7 @@ class OpenAIEmbedder:
     def __init__(self, model: str = EMBEDDING_MODEL, cache_size: int = 256) -> None:
         self.model = model
         self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self._query_cache: dict[str, np.ndarray] = {}
+        self._query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._cache_size = cache_size
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:
@@ -73,14 +74,14 @@ class OpenAIEmbedder:
         return arr
 
     def embed_query(self, query: str) -> np.ndarray:
-        """Генерирует эмбеддинг одного запроса. Возвращает shape (1, dim). Кэширует."""
+        """Генерирует эмбеддинг одного запроса. Возвращает shape (1, dim). Кэширует (LRU)."""
         key = query.strip()
         if key in self._query_cache:
+            self._query_cache.move_to_end(key)
             return self._query_cache[key]
         result = self.embed_texts([query])
-        # Evict oldest if cache full
+        # Evict least recently used if cache full
         if len(self._query_cache) >= self._cache_size:
-            oldest = next(iter(self._query_cache))
-            del self._query_cache[oldest]
+            self._query_cache.popitem(last=False)
         self._query_cache[key] = result
         return result
