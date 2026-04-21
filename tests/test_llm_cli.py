@@ -58,7 +58,7 @@ def mock_client():
 class TestModels:
     def test_get_available_models_count(self):
         models = get_available_models()
-        assert len(models) == 5, "Should have 5 models (2 GLM + 3 OpenAI)"
+        assert len(models) == 6, "Should have 6 models (2 GLM + 3 OpenAI + 1 Ollama)"
     
     def test_all_models_have_pricing(self):
         models = get_available_models()
@@ -464,6 +464,7 @@ class TestStreamInterrupt:
             c.choices = [MagicMock()]
             c.choices[0].delta = MagicMock()
             c.choices[0].delta.reasoning_content = text
+            c.choices[0].delta.reasoning = None
             c.choices[0].delta.content = None
             chunks.append(c)
 
@@ -472,6 +473,7 @@ class TestStreamInterrupt:
             c.choices = [MagicMock()]
             c.choices[0].delta = MagicMock()
             c.choices[0].delta.reasoning_content = None
+            c.choices[0].delta.reasoning = None
             c.choices[0].delta.content = text
             chunks.append(c)
 

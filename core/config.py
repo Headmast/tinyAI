@@ -10,6 +10,7 @@
     config = get_config()
     client = get_llm_client()           # Cloud.ru клиент
     client = get_llm_client("openai")   # OpenAI клиент (для embeddings)
+    client = get_llm_client("ollama")   # Локальный Ollama клиент
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 
 CLOUD_BASE_URL = "https://foundation-models.api.cloud.ru/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 DEFAULT_MODEL = "zai-org/GLM-4.7"
 DEFAULT_FAST_MODEL = "zai-org/GLM-4.7-Flash"
@@ -108,6 +110,13 @@ def get_llm_client(provider: str = "cloud") -> "OpenAI":
     from openai import OpenAI
 
     config = get_config()
+
+    if provider == "ollama":
+        ollama_url = os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
+        return OpenAI(
+            api_key="ollama",
+            base_url=ollama_url,
+        )
 
     if provider == "openai":
         if not config.has_openai_key:

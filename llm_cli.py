@@ -110,6 +110,14 @@ def get_available_models():
             "description": "Облегченная версия GPT-5.4, оптимальная для большинства задач",
             "provider": "openai",
             "id": 5
+        },
+        "qwen3:8b": {
+            "name": "Qwen3 8B (Ollama)",
+            "prompt_price": 0.0,
+            "completion_price": 0.0,
+            "description": "Локальная модель Qwen3 8B через Ollama",
+            "provider": "ollama",
+            "id": 6
         }
     }
 
@@ -145,6 +153,11 @@ MODEL_PARAMS_SCHEMA = {
         "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 1.0,  "desc": "Nucleus sampling"},
         "presence_penalty":  {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за повторение тем"},
         "frequency_penalty": {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за частые токены"},
+    },
+    "qwen3:8b": {
+        "temperature":   {"type": float, "min": 0.0, "max": 2.0, "default": 0.7,  "desc": "Случайность (0=детерм., 2=макс.)"},
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 32768, "default": 8000, "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 0.9,  "desc": "Nucleus sampling"},
     },
 }
 
@@ -1186,8 +1199,10 @@ def stream_response(client, params, show_thinking=True):
 
             delta = chunk.choices[0].delta
 
-            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                reasoning_text += delta.reasoning_content
+            # GLM uses reasoning_content, Ollama/Qwen uses reasoning
+            reasoning_chunk = getattr(delta, 'reasoning_content', None) or getattr(delta, 'reasoning', None)
+            if reasoning_chunk:
+                reasoning_text += reasoning_chunk
 
                 if _flags[0]:
                     if in_reasoning:
@@ -1199,7 +1214,7 @@ def stream_response(client, params, show_thinking=True):
                     print("\n💭 [Размышление]  (Ctrl+C — пропустить)", flush=True)
                     in_reasoning = True
                 if show_thinking:
-                    print(delta.reasoning_content, end="", flush=True)
+                    print(reasoning_chunk, end="", flush=True)
 
             if hasattr(delta, 'content') and delta.content:
                 if in_reasoning:
@@ -2102,8 +2117,8 @@ def main():
     openai_api_key = os.getenv("OPENAI_API_KEY")
 
     if not cloud_api_key and not openai_api_key:
-        print("❌ Ни CLOUD_API_KEY, ни OPENAI_API_KEY не найдены в .env")
-        return
+        print("⚠️  Ни CLOUD_API_KEY, ни OPENAI_API_KEY не найдены в .env")
+        print("   Проверяем локальный Ollama...")
 
     clients = {}
     if cloud_api_key:
@@ -2115,10 +2130,29 @@ def main():
     if openai_api_key:
         clients["openai"] = OpenAI(api_key=openai_api_key, timeout=120.0)
 
+    # Ollama (локальный провайдер) — проверяем доступность
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    try:
+        import httpx
+        r = httpx.get(ollama_url.replace("/v1", "/api/tags"), timeout=2.0)
+        if r.status_code == 200:
+            clients["ollama"] = OpenAI(api_key="ollama", base_url=ollama_url, timeout=120.0)
+    except Exception:
+        pass  # Ollama недоступен — пропускаем
+
+    if not clients:
+        print("❌ Нет доступных провайдеров (API-ключи не найдены, Ollama недоступен)")
+        return
+
     storage = PostStorage(base_dir="posts")
     session_storage = SessionStorage("sessions")
     tracker = UsageTracker(logs_dir="logs")
-    current_model = "zai-org/GLM-4.7-Flash" if "cloud_ru" in clients else "gpt-5-nano"
+    if "cloud_ru" in clients:
+        current_model = "zai-org/GLM-4.7-Flash"
+    elif "ollama" in clients:
+        current_model = "qwen3:8b"
+    else:
+        current_model = "gpt-5-nano"
 
     s = tracker.get_summary()
     print("╔══════════════════════════════════════╗")

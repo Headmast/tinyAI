@@ -35,6 +35,7 @@ MODEL_CONTEXT_SIZES: Dict[str, int] = {
     "gpt-5-nano": 128_000,
     "gpt-5.4": 128_000,
     "gpt-5.4-mini": 128_000,
+    "qwen3:8b": 32_768,
 }
 DEFAULT_CONTEXT_SIZE = 128_000
 
