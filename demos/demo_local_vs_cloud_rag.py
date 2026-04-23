@@ -148,6 +148,9 @@ def create_agent(provider: str, verbose: bool = False) -> Optional[RagAgent]:
                 provider="ollama",
                 index_dir=PROJECT_ROOT / "rag_data" / "local",
                 verbose=verbose,
+                top_k=5,
+                top_k_before=7,
+                top_k_after=5,
                 enable_query_rewrite=True,
                 enable_rerank=True,
             )
@@ -157,6 +160,11 @@ def create_agent(provider: str, verbose: bool = False) -> Optional[RagAgent]:
                 provider="cloud",
                 index_dir=PROJECT_ROOT / "rag_data",
                 verbose=verbose,
+                top_k=5,
+                top_k_before=7,
+                top_k_after=5,
+                enable_query_rewrite=True,
+                enable_rerank=True,
             )
     except Exception as e:
         print(f"  ⚠ Не удалось создать {provider} агента: {e}")

@@ -39,8 +39,8 @@ DEFAULT_BASE_URL = os.getenv("BASE_URL", "https://foundation-models.api.cloud.ru
 DEFAULT_INDEX_DIR = Path(__file__).parent.parent / "rag_data"
 DEFAULT_REWRITE_ENABLED = True
 DEFAULT_RERANK_ENABLED = True
-DEFAULT_TOP_K_BEFORE = 10
-DEFAULT_TOP_K_AFTER = 10
+DEFAULT_TOP_K_BEFORE = 8
+DEFAULT_TOP_K_AFTER = 5
 DEFAULT_SIMILARITY_THRESHOLD = 0.30
 DEFAULT_CONFIDENCE_THRESHOLD = 0.40
 DEFAULT_RAG_TEMPERATURE = 0.3
@@ -177,9 +177,7 @@ class RagAgent:
                 enabled=self.enable_query_rewrite,
                 verbose=self.verbose,
             )
-            self.reranker = LLMReranker(
-                client=self.client,
-                model=self.reranker_model,
+            self.reranker = MathReranker(
                 enabled=self.enable_rerank,
                 verbose=self.verbose,
             )
@@ -611,7 +609,7 @@ class RagAgent:
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": 2000,
+            "max_tokens": 1200,
         }
         if self.model not in ("gpt-5-nano", "gpt-5.4", "gpt-5.4-mini", "gpt-5"):
             params["temperature"] = temp
@@ -653,7 +651,7 @@ class RagAgent:
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": 2000,
+            "max_tokens": 1200,
             "stream": True,
         }
         if self.model not in ("gpt-5-nano", "gpt-5.4", "gpt-5.4-mini", "gpt-5"):
