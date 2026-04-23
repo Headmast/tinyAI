@@ -10,6 +10,7 @@
 set -euo pipefail
 
 MODEL="${OLLAMA_MODEL:-qwen3:8b}"
+EMBED_MODEL="${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 
 export OLLAMA_HOST
@@ -61,6 +62,15 @@ pull_model() {
         ollama pull "${MODEL}"
         _ok "Модель ${MODEL} загружена"
     fi
+
+    _info "Проверяем embedding-модель ${EMBED_MODEL}..."
+    if ollama list 2>/dev/null | grep -q "${EMBED_MODEL}"; then
+        _ok "Модель ${EMBED_MODEL} уже загружена"
+    else
+        _info "Скачиваем embedding-модель ${EMBED_MODEL}..."
+        ollama pull "${EMBED_MODEL}"
+        _ok "Модель ${EMBED_MODEL} загружена"
+    fi
 }
 
 stop_server() {
@@ -85,8 +95,9 @@ case "${1:-start}" in
         start_server
         pull_model
         echo ""
-        _ok "Готово! Ollama + ${MODEL} доступны"
+        _ok "Готово! Ollama + ${MODEL} + ${EMBED_MODEL} доступны"
         _info "API endpoint: http://${OLLAMA_HOST}/v1"
+        _info "LLM-модель: ${MODEL} | Embedding-модель: ${EMBED_MODEL}"
         _info "Используйте в TinyAI: model qwen3:8b"
         echo ""
         _info "Для остановки: ./run_ollama.sh stop"

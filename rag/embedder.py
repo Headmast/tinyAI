@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import time
 from collections import OrderedDict
-from typing import List
+from typing import List, Protocol, runtime_checkable
 
 import numpy as np
 from openai import OpenAI
@@ -22,6 +22,24 @@ load_dotenv()
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIM = 1536
 BATCH_SIZE = 100  # OpenAI рекомендует до 2048, но 100 — безопасный размер
+
+
+@runtime_checkable
+class Embedder(Protocol):
+    """Протокол для любого эмбеддера (OpenAI, Ollama, sentence-transformers и т.д.)."""
+
+    @property
+    def dimension(self) -> int:
+        """Размерность эмбеддинг-вектора."""
+        ...
+
+    def embed_texts(self, texts: List[str]) -> np.ndarray:
+        """Возвращает np.ndarray shape (len(texts), dimension), L2-нормализованный."""
+        ...
+
+    def embed_query(self, query: str) -> np.ndarray:
+        """Возвращает np.ndarray shape (1, dimension), L2-нормализованный."""
+        ...
 
 
 class OpenAIEmbedder:
@@ -38,6 +56,10 @@ class OpenAIEmbedder:
         self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self._query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._cache_size = cache_size
+
+    @property
+    def dimension(self) -> int:
+        return EMBEDDING_DIM
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:
         """

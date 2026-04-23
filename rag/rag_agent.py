@@ -27,9 +27,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from rag import CitedAnswer, Quote, SearchResult, SourceRef
 from rag.citation_parser import parse_cited_response, normalize_text
+from rag.embedder import Embedder
 from rag.search import search as rag_search
 from rag.query_rewrite import QueryRewriter, DEFAULT_REWRITE_MODEL
-from rag.reranker import LLMReranker, DEFAULT_RERANKER_MODEL
+from rag.reranker import LLMReranker, MathReranker, DEFAULT_RERANKER_MODEL
 
 load_dotenv()
 
@@ -120,6 +121,7 @@ class RagAgent:
         reranker_model: str = DEFAULT_RERANKER_MODEL,
         temperature: float = DEFAULT_RAG_TEMPERATURE,
         verbose: bool = False,
+        provider: str = "cloud",
     ) -> None:
         self.model = model
         self.index_dir = Path(index_dir)
@@ -135,37 +137,59 @@ class RagAgent:
         self.reranker_model = reranker_model
         self.temperature = temperature
         self.verbose = verbose
+        self.provider = provider
 
         self._gpt_client: Optional[OpenAI] = None
+        self._embedder: Optional[Embedder] = None
 
-        api_key = os.getenv("CLOUD_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise EnvironmentError(
-                "API-ключ не найден. Задайте CLOUD_API_KEY или OPENAI_API_KEY в .env"
+        if provider == "ollama":
+            from core.config import get_llm_client
+            self.client = get_llm_client("ollama")
+            # Локальный эмбеддер
+            from rag.local_embedder import OllamaEmbedder
+            self._embedder = OllamaEmbedder()
+            # MathReranker для локального режима (без LLM-вызовов для ранжирования)
+            self.reranker = MathReranker(
+                enabled=self.enable_rerank,
+                verbose=self.verbose,
             )
+            self.query_rewriter = QueryRewriter(
+                client=self.client,
+                model=self.model,
+                enabled=self.enable_query_rewrite,
+                verbose=self.verbose,
+            )
+        else:
+            api_key = os.getenv("CLOUD_API_KEY") or os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise EnvironmentError(
+                    "API-ключ не найден. Задайте CLOUD_API_KEY или OPENAI_API_KEY в .env"
+                )
 
-        self.client = OpenAI(
-            base_url=os.getenv("BASE_URL", DEFAULT_BASE_URL),
-            api_key=api_key,
-            timeout=120.0,
-        )
-        self.query_rewriter = QueryRewriter(
-            client=self.client,
-            model=self.rewrite_model,
-            enabled=self.enable_query_rewrite,
-            verbose=self.verbose,
-        )
-        self.reranker = LLMReranker(
-            client=self.client,
-            model=self.reranker_model,
-            enabled=self.enable_rerank,
-            verbose=self.verbose,
-        )
+            self.client = OpenAI(
+                base_url=os.getenv("BASE_URL", DEFAULT_BASE_URL),
+                api_key=api_key,
+                timeout=120.0,
+            )
+            self.query_rewriter = QueryRewriter(
+                client=self.client,
+                model=self.rewrite_model,
+                enabled=self.enable_query_rewrite,
+                verbose=self.verbose,
+            )
+            self.reranker = LLMReranker(
+                client=self.client,
+                model=self.reranker_model,
+                enabled=self.enable_rerank,
+                verbose=self.verbose,
+            )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _get_client(self) -> OpenAI:
         """Return the appropriate OpenAI client for the configured model."""
+        if self.provider == "ollama":
+            return self.client
         if self.model in _GPT_MODELS:
             if self._gpt_client is None:
                 openai_key = os.getenv("OPENAI_API_KEY")
@@ -291,6 +315,7 @@ class RagAgent:
             top_k_after=k,
             similarity_threshold=self.similarity_threshold,
             reranker=self.reranker if use_rerank else None,
+            embedder=self._embedder,
         )
 
         context_parts: List[str] = []
@@ -396,6 +421,7 @@ class RagAgent:
             top_k_after=k,
             similarity_threshold=self.similarity_threshold,
             reranker=self.reranker if use_rerank else None,
+            embedder=self._embedder,
         )
 
         # Anti-hallucination guard
@@ -563,6 +589,16 @@ class RagAgent:
 
     # ── Внутренние методы ─────────────────────────────────────────────────────
 
+    def _prepare_messages(
+        self, messages: List[Dict[str, str]]
+    ) -> List[Dict[str, str]]:
+        """Prepare messages for the LLM. Disables thinking for Ollama qwen3."""
+        if self.provider == "ollama" and "qwen3" in self.model:
+            messages = [m.copy() for m in messages]
+            if messages and messages[-1]["role"] == "user":
+                messages[-1]["content"] += " /nothink"
+        return messages
+
     def _call_llm(
         self,
         messages: List[Dict[str, str]],
@@ -571,6 +607,7 @@ class RagAgent:
         """Call LLM with retry logic."""
         client = self._get_client()
         temp = temperature if temperature is not None else self.temperature
+        messages = self._prepare_messages(messages)
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -612,6 +649,7 @@ class RagAgent:
 
         client = self._get_client()
         temp = temperature if temperature is not None else self.temperature
+        messages = self._prepare_messages(messages)
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,

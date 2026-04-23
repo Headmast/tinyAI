@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from rag import Document, Chunk
 from rag.chunker import FixedSizeChunker, StructureChunker
-from rag.embedder import OpenAIEmbedder
+from rag.embedder import Embedder, OpenAIEmbedder
 from rag.index_store import FAISSIndexStore, get_chunk_stats
 
 
@@ -77,6 +77,7 @@ def build_index(
     strategy: str = "both",
     docs_dir: str = "docs/",
     index_dir: str = "rag_data/",
+    embedder: Embedder | None = None,
 ) -> dict:
     """
     Основной пайплайн индексации.
@@ -116,7 +117,8 @@ def build_index(
     if strategy in ("structure", "both"):
         strategies.append("structure")
 
-    embedder = OpenAIEmbedder()
+    if embedder is None:
+        embedder = OpenAIEmbedder()
     store = FAISSIndexStore(index_dir=index_path)
     stats: dict = {"documents": len(documents), "total_chars": total_chars}
 
@@ -208,12 +210,27 @@ def main():
         default="rag_data/",
         help="Директория для индекса (по умолчанию: rag_data/)",
     )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Использовать локальный Ollama embedder (nomic-embed-text)",
+    )
     args = parser.parse_args()
+
+    embedder = None
+    index_dir = args.index_dir
+    if args.local:
+        from rag.local_embedder import OllamaEmbedder
+        embedder = OllamaEmbedder()
+        if index_dir == "rag_data/":
+            index_dir = "rag_data/local/"
+        print("🏠 Режим: локальный (Ollama nomic-embed-text)")
 
     build_index(
         strategy=args.strategy,
         docs_dir=args.docs_dir,
-        index_dir=args.index_dir,
+        index_dir=index_dir,
+        embedder=embedder,
     )
 
 

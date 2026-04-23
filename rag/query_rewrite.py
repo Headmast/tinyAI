@@ -70,6 +70,9 @@ class QueryRewriter:
             {"role": "system", "content": _REWRITE_SYSTEM_PROMPT},
             {"role": "user", "content": query},
         ]
+        # Disable thinking for qwen3 models (Ollama)
+        if "qwen3" in self.model and messages[-1]["role"] == "user":
+            messages[-1] = {**messages[-1], "content": messages[-1]["content"] + " /nothink"}
         try:
             response = self.client.chat.completions.create(
                 model=self.model,

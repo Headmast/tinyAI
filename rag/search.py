@@ -17,7 +17,7 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from rag import Chunk, SearchResult
-from rag.embedder import OpenAIEmbedder
+from rag.embedder import Embedder, OpenAIEmbedder
 from rag.index_store import FAISSIndexStore, get_chunks_by_faiss_ids
 from rag.reranker import RerankerProtocol
 
@@ -33,6 +33,7 @@ def search(
     top_k_after: Optional[int] = None,
     similarity_threshold: float = 0.0,
     reranker: Optional[RerankerProtocol] = None,
+    embedder: Optional[Embedder] = None,
 ) -> List[SearchResult]:
     """
     Поиск релевантных чанков по текстовому запросу.
@@ -57,7 +58,8 @@ def search(
 
     index_path = Path(index_dir)
     store = FAISSIndexStore(index_dir=index_path)
-    embedder = OpenAIEmbedder()
+    if embedder is None:
+        embedder = OpenAIEmbedder()
 
     # Определяем стратегии для поиска
     if strategy:
