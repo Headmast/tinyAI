@@ -264,7 +264,7 @@ class RagAgent:
         else:
             response = self._call_llm(messages)
             elapsed_ms = (time.monotonic() - t0) * 1000
-            answer = response.choices[0].message.content or ""
+            answer = self._extract_answer(response)
             token_usage = self._extract_usage(response)
 
         if self.verbose and not stream:
@@ -354,7 +354,7 @@ class RagAgent:
         else:
             response = self._call_llm(messages)
             elapsed_ms = (time.monotonic() - t0) * 1000
-            answer = response.choices[0].message.content or ""
+            answer = self._extract_answer(response)
             token_usage = self._extract_usage(response)
 
         if self.verbose and not stream:
@@ -462,7 +462,7 @@ class RagAgent:
             raw_response = self._stream_llm(messages, temperature=0.2)
         else:
             response = self._call_llm(messages, temperature=0.2)
-            raw_response = response.choices[0].message.content or ""
+            raw_response = self._extract_answer(response)
 
         elapsed_ms = (time.monotonic() - t0) * 1000
 
@@ -597,6 +597,17 @@ class RagAgent:
                 messages[-1]["content"] += " /nothink"
         return messages
 
+    @staticmethod
+    def _extract_answer(response: Any) -> str:
+        """Extract text from LLM response, falling back to reasoning field."""
+        msg = response.choices[0].message
+        if msg.content:
+            return msg.content
+        data = msg.model_dump()
+        if data.get("reasoning"):
+            return data["reasoning"]
+        return ""
+
     def _call_llm(
         self,
         messages: List[Dict[str, str]],
@@ -609,8 +620,15 @@ class RagAgent:
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": 1200,
         }
+        # GLM models: use max_completion_tokens + thinking enabled
+        if "GLM" in self.model:
+            params["max_completion_tokens"] = 4096
+            params["extra_body"] = {"thinking": {
+                "type": "enabled", "clear_thinking": False
+            }}
+        else:
+            params["max_tokens"] = 1200
         if self.model not in ("gpt-5-nano", "gpt-5.4", "gpt-5.4-mini", "gpt-5"):
             params["temperature"] = temp
 
@@ -651,9 +669,16 @@ class RagAgent:
         params: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": 1200,
             "stream": True,
         }
+        # GLM models: use max_completion_tokens + thinking enabled
+        if "GLM" in self.model:
+            params["max_completion_tokens"] = 4096
+            params["extra_body"] = {"thinking": {
+                "type": "enabled", "clear_thinking": False
+            }}
+        else:
+            params["max_tokens"] = 1200
         if self.model not in ("gpt-5-nano", "gpt-5.4", "gpt-5.4-mini", "gpt-5"):
             params["temperature"] = temp
 
