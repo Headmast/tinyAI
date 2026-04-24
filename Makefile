@@ -41,3 +41,12 @@ install:  ## Установка зависимостей
 
 install-dev:  ## Установка dev-зависимостей
 	pip install -e ".[dev]"
+
+benchmark-local:  ## Полный бенчмарк локальной LLM (все фазы)
+	python3 benchmarks/benchmark_rag_local.py
+
+benchmark-local-quick:  ## Быстрый бенчмарк локальной LLM (2 вопроса)
+	python3 benchmarks/benchmark_rag_local.py --quick
+
+ollama-quant:  ## Скачать квантованные модели для бенчмарка
+	./run_ollama.sh quant

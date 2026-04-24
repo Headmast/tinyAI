@@ -118,6 +118,22 @@ def get_available_models():
             "description": "Локальная модель Qwen3 8B через Ollama",
             "provider": "ollama",
             "id": 6
+        },
+        "qwen3:8b-q8_0": {
+            "name": "Qwen3 8B Q8 (Ollama)",
+            "prompt_price": 0.0,
+            "completion_price": 0.0,
+            "description": "Квантованная 8-bit версия Qwen3 8B (меньше RAM, ~равное качество)",
+            "provider": "ollama",
+            "id": 7
+        },
+        "qwen3:8b-q4_K_M": {
+            "name": "Qwen3 8B Q4 (Ollama)",
+            "prompt_price": 0.0,
+            "completion_price": 0.0,
+            "description": "Квантованная 4-bit версия Qwen3 8B (минимум RAM, быстрее, ниже качество)",
+            "provider": "ollama",
+            "id": 8
         }
     }
 
@@ -155,6 +171,16 @@ MODEL_PARAMS_SCHEMA = {
         "frequency_penalty": {"type": float, "min": -2.0, "max": 2.0, "default": 0.0, "desc": "Штраф за частые токены"},
     },
     "qwen3:8b": {
+        "temperature":   {"type": float, "min": 0.0, "max": 2.0, "default": 0.7,  "desc": "Случайность (0=детерм., 2=макс.)"},
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 32768, "default": 8000, "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 0.9,  "desc": "Nucleus sampling"},
+    },
+    "qwen3:8b-q8_0": {
+        "temperature":   {"type": float, "min": 0.0, "max": 2.0, "default": 0.7,  "desc": "Случайность (0=детерм., 2=макс.)"},
+        "max_completion_tokens": {"type": int,   "min": 1,   "max": 32768, "default": 8000, "desc": "Макс. токенов в ответе"},
+        "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 0.9,  "desc": "Nucleus sampling"},
+    },
+    "qwen3:8b-q4_K_M": {
         "temperature":   {"type": float, "min": 0.0, "max": 2.0, "default": 0.7,  "desc": "Случайность (0=детерм., 2=макс.)"},
         "max_completion_tokens": {"type": int,   "min": 1,   "max": 32768, "default": 8000, "desc": "Макс. токенов в ответе"},
         "top_p":         {"type": float, "min": 0.0, "max": 1.0, "default": 0.9,  "desc": "Nucleus sampling"},

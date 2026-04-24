@@ -69,6 +69,29 @@ SYSTEM_PROMPT_TEMPLATE = """\
 Отвечай на вопрос пользователя, придерживаясь формата выше. Начни сразу с объяснения, без вступлений вроде "конечно" или "вот".
 """
 
+# ── Оптимизированный промпт для локальных моделей (Qwen3 8B и т.п.) ──────────
+# Короче, директивнее, без лишних инструкций — лучше для моделей <10B параметров.
+
+OPTIMIZED_LOCAL_SYSTEM_PROMPT = """\
+Ты — ассистент проекта TinyAI. Отвечай ТОЛЬКО на основе контекста ниже.
+
+Правила:
+- Используй ТОЛЬКО информацию из контекста. Нет данных — скажи прямо.
+- Отвечай на языке вопроса.
+- Формат: сначала ответ, потом цитаты, потом источники.
+
+Формат ответа:
+1. Основной ответ (2-4 абзаца, конкретно и по делу)
+2. Цитаты (2-3 штуки):
+   > «цитата» — [N] документ
+3. Источники (после ───):
+   [N] Файл — Раздел
+
+{memory_context_block}
+
+{context}
+"""
+
 CONVERSATION_PREFIX = """\
 Ниже — история диалога (последние сообщения). Помни контекст задачи при ответе.
 
@@ -98,6 +121,7 @@ class RagChatAgent:
         enable_rerank: bool = True,
         fast_mode: bool = False,
         verbose: bool = False,
+        use_optimized_prompt: bool = False,
     ) -> None:
         self.model = model
         self.index_dir = Path(index_dir) if index_dir else DEFAULT_INDEX_DIR
@@ -109,6 +133,7 @@ class RagChatAgent:
         self.enable_rerank = enable_rerank
         self.fast_mode = fast_mode
         self.verbose = verbose
+        self.use_optimized_prompt = use_optimized_prompt
 
         # ── API client ──
         api_key = os.getenv("CLOUD_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -300,8 +325,13 @@ class RagChatAgent:
         # RAG context from cited answer
         rag_context = self._build_context_from_cited_answer(cited_answer)
 
-        # System prompt
-        system_content = SYSTEM_PROMPT_TEMPLATE.format(
+        # System prompt — выбираем шаблон в зависимости от настройки
+        prompt_template = (
+            OPTIMIZED_LOCAL_SYSTEM_PROMPT
+            if self.use_optimized_prompt
+            else SYSTEM_PROMPT_TEMPLATE
+        )
+        system_content = prompt_template.format(
             memory_context_block=memory_block,
             context=rag_context,
         )
@@ -316,19 +346,21 @@ class RagChatAgent:
         for ex in exchanges:
             prefix = "Пользователь" if ex["role"] == "user" else "Ассистент"
             history_text += f"• {prefix}: {ex['content']}\n\n"
-        
+
+        user_content = ""
         if history_text:
-            # Add history as a user message (the assistant's own past answers)
-            # This keeps conversation context flowing
-            messages.append({
-                "role": "user",
-                "content": CONVERSATION_PREFIX.format(
-                    history=history_text.strip(),
-                    user_input=user_input,
-                ),
-            })
+            user_content = CONVERSATION_PREFIX.format(
+                history=history_text.strip(),
+                user_input=user_input,
+            )
         else:
-            messages.append({"role": "user", "content": user_input})
+            user_content = user_input
+
+        # /nothink для Qwen3 (отключает внутреннее рассуждение, экономит токены)
+        if "qwen3" in self.model.lower():
+            user_content += " /nothink"
+
+        messages.append({"role": "user", "content": user_content})
 
         return messages
 

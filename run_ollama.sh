@@ -13,6 +13,9 @@ MODEL="${OLLAMA_MODEL:-qwen3:8b}"
 EMBED_MODEL="${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 
+# Квантованные варианты для бенчмарка (скачиваются по запросу)
+QUANT_MODELS=("qwen3:8b-q8_0" "qwen3:8b-q4_K_M")
+
 export OLLAMA_HOST
 
 _info()  { printf "\033[36m→ %s\033[0m\n" "$*"; }
@@ -73,6 +76,18 @@ pull_model() {
     fi
 }
 
+pull_quant_models() {
+    _info "Скачиваем квантованные модели для бенчмарка..."
+    for qm in "${QUANT_MODELS[@]}"; do
+        if ollama list 2>/dev/null | grep -q "${qm}"; then
+            _ok "Модель ${qm} уже загружена"
+        else
+            _info "Скачиваем ${qm}..."
+            ollama pull "${qm}" && _ok "${qm} загружена" || _err "Не удалось скачать ${qm}"
+        fi
+    done
+}
+
 stop_server() {
     _info "Останавливаем Ollama..."
     pkill -f "ollama serve" 2>/dev/null && _ok "Ollama остановлен" || _err "Ollama не запущен"
@@ -116,8 +131,18 @@ case "${1:-start}" in
     models)
         ollama list 2>/dev/null || _err "Ollama не запущен"
         ;;
+    quant)
+        check_ollama_installed
+        start_server
+        pull_model
+        pull_quant_models
+        echo ""
+        _ok "Все модели (включая квантованные) загружены"
+        _info "Доступные модели:"
+        ollama list 2>/dev/null
+        ;;
     *)
-        echo "Использование: $0 {start|stop|status|models}"
+        echo "Использование: $0 {start|stop|status|models|quant}"
         exit 1
         ;;
 esac

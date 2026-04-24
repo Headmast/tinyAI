@@ -1,0 +1,800 @@
+{
+  "benchmark": "RAG Local LLM Optimization",
+  "phase": "params",
+  "timestamp": "2026-04-24T10:33:30.709856",
+  "results": [
+    {
+      "config": {
+        "name": "baseline",
+        "label": "Baseline (temp=0.4, max=1200, top_p=0.9)",
+        "model": "qwen3:8b",
+        "temperature": 0.4,
+        "max_tokens": 1200,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает несколько ключевых компонентов, которые обеспечивают эффективное управление контекстом, поиском информации и генерацией ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   Реализует **слоистую память** для хранения и управления контекстом:  \n   - **ShortTermMemory** (кэш из 20 последних сообщений) — временная память для быстрого доступа.  \n   - **WorkingMemory** (словарь в памяти) — активная область для текущих данных.  \n   - **LongTermMemory** (JSON-файл) — долгосрочное хранение информации.  \n   Эти слои позволяют системе эффективно использовать контекст из истории диалога и внешних источников.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 2_\n\n2. **Модуль `news_agent`**  \n   Использует **pipeline-подход** с этапами:  \n   - **Planner** — планирование запросов.  \n   - **Researcher** — поиск информации в внешних источниках.  \n   - **Writer/Editor** — генерация и редактирование ответов.  \n   - **SEO-оптимизация** — улучшение структуры текста для поисковых систем.  \n   Также включает **FSMAgent** (Finite State Machine) для управления состоянием процесса.  \n   > «Несколько стратегий генерации и MCP-бэкэнд для логов/памяти» — _документ 2_\n\n3. **Стратегии контекстной компрессии**  \n   Для оптимизации использования токенов:  \n   - **SlidingWindowStrategy** — суммаризация последних сообщений.  \n   - **StickyFactsStrategy** — сохранение ключевых фактов из старых сообщений.  \n   - **BranchingStrategy** — экономия токенов на 40-60% за счёт выборочного хранения.  \n   > «Стратегии: SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy» — _документ 3_\n\n4. **Интеграция с MCP (Memory Control Protocol)**  \n   JSON-RPC 2.0-бэкенд для:  \n   - Хранения логов и метрик.  \n   - Управления памятью между модулями.  \n   - Отслеживания использования токенов и статистики.  \n   > «MCP stdio — JSON-RPC 2.0 бэкенд для логов, памяти, статистики» — _документ 2_\n\n5. **Поддержка пользовательских профилей**  \n   Через `PersonalizedAgent` и `ProfileManager`:  \n   - Инъекция профиля в системный prompt.  \n  ",
+          "total_time": 33.89,
+          "ttft": 16.758,
+          "completion_tokens_est": 697,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 20.57,
+          "response_length": 2092,
+          "word_count": 239,
+          "error": null,
+          "keyword_score": 0.2,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI — это интеграция между LLM (большой языковой моделью) и системой управления логами, памятью и статистикой через MCP (Management Control Plane). Его основная задача — обрабатывать запросы пользователей, используя реальные данные из инструментов MCP, а не гадая. Вот как это работает:\n\n---\n\n### **Как MCP Agent работает**\n1. **Пользователь отправляет запрос**  \n   Например: *\"Покажи статистику использования\"*.  \n   Agent передаёт это сообщение в LLM через OpenAI API, указывая доступные MCP-инструменты.\n\n2. **LLM анализирует запрос и формирует вызовы инструментов**  \n   Модель определяет, какие инструменты MCP нужны. Например, для статистики вызывается `get_usage_stats`.  \n   > «tool_call(get_usage_stats, {})» — _TASK17_README.md_\n\n3. **MCPAgent выполняет вызовы через MCPBridge**  \n   Инструменты отправляются на MCP-сервер (JSON-RPC), который возвращает данные.  \n   Пример ответа от сервера:  \n   > «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15» — _TASK17_README.md_\n\n4. **Результаты возвращаются LLM как \"tool_response\"**  \n   Модель использует эти данные для формирования окончательного ответа пользователю.  \n   > «LLM: \"По данным системы, за все время было 12 разговоров...\"» — _TASK17_README.md_\n\n---\n\n### **Инструменты MCP Agent**\nMCP Agent использует шесть ключевых инструментов для работы с системой:\n1. **ЛОГАМИ РАЗГОВОРОВ**  \n   - `list_logs` — список всех логов  \n   - `read_log` — детали конкретного разговора  \n   - `search_logs` — поиск по логам  \n   - `get_conversation_summary` — краткое содержание разговора  \n\n2. **ПАМЯТЬЮ АГЕНТА**  \n   - `list_memory` — список ключей памяти  \n   - `read_memory` — чтение значения ключа  \n   - `save_memory` — сохранение данных в память  \n   - `delete_memory_key` — удаление ключа  \n\n3. **СТАТИСТИКОЙ**  \n   - `get_usage_stats` — общая статистика использования (разговоры, токены, стоимость)  \n\n> «Инструменты для работы с: ЛОГАМИ РАЗГОВОРОВ, ПАМЯТЬЮ АГЕНТА, СТАТИСТИКОЙ» — _workflow/prompts_reference.md_\n\n---\n\n### **Правила использования инструментов**\n- **Не придумывайте данные** — всегда используйте реальные значения из инструментов.  \n- **При вопросах об истории** — ищите сначала в логах и памяти.  \n- **Если нужно запомнить** — используйте `save_memory`.  \n\n---\n\n───  \n**Источники:**  \n[1] Источник: docs/tasks/TASK17_README.md — Раздел: 2. Демо агента с MCP-инструментами  \n[2] Источник: docs/ARCHITECTURE.md — Раздел: TinyAI — Архитектурная документация  \n[3] И",
+          "total_time": 31.993,
+          "ttft": 11.931,
+          "completion_tokens_est": 818,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 25.57,
+          "response_length": 2456,
+          "word_count": 300,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 32.941,
+        "avg_ttft": 14.345,
+        "avg_tokens_per_sec": 23.0,
+        "avg_word_count": 269.5,
+        "avg_keyword_score": 0.6,
+        "citation_rate": 1.0,
+        "source_rate": 0.5,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "temp_0.0",
+        "label": "Temperature=0.0",
+        "model": "qwen3:8b",
+        "temperature": 0.0,
+        "max_tokens": 1200,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "TinyAI использует архитектуру RAG (Retrieval-Augmented Generation), которая включает в себя несколько ключевых компонентов, разделённых на модули. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   - **Layered Memory** (Три слоя памяти):  \n     - `ShortTermMemory` (deque, N=20) — временные данные, быстро доступные.  \n     - `WorkingMemory` (dict, in-RAM) — активная область для текущих задач.  \n     - `LongTermMemory` (JSON-файл) — долгосрочное хранение информации.  \n   - **MemoryManager** — управляет маршрутизацией данных между слоями.  \n   - **PersonalizedAgent** — интеграция профиля пользователя в системный prompt для персонализации.  \n   - **ProfileManager** — управление пресетами и пользовательскими настройками.  \n\n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 2_  \n   > «ProfileManager — пресеты + пользовательские профили» — _документ 2_\n\n2. **Модуль `news_agent`**  \n   - **Pipeline + ReAct + FSM + MCP** — комбинированный подход к генерации и управлению контекстом:  \n     - **NewsPipeline** — пять этапов LLM-вызовов (Planner, Researcher, Writer, Editor, SEO).  \n     - **AgentLoop (ReAct)** — цикл \"Думай → Действуй → Наблюдай\" с ограничениями на итерации и токены.  \n     - **FSMAgent** — управление состоянием через конечные автоматы.  \n     - **MCP-бэкенд** — JSON-RPC 2.0 для логирования и хранения данных.  \n   - **ConversationSession** — управление контекстом с стратегиями:  \n     - `SlidingWindowStrategy` — скользящее окно для сокращения токенов.  \n     - `StickyFactsStrategy` — фиксация ключевых фактов.  \n     - `BranchingStrategy` — оптимизация токенов на 40-60%.  \n   - **PostStorage** — форматирование вывода (md/html/tg/json/plain).  \n   - **TokenCounter** и **UsageTracker** — мониторинг токенов и использования.  \n\n   > «Несколько",
+          "total_time": 34.101,
+          "ttft": 19.658,
+          "completion_tokens_est": 599,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 17.57,
+          "response_length": 1799,
+          "word_count": 211,
+          "error": null,
+          "keyword_score": 0.2,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как связующее звено между LLM (большой языковой моделью) и системой управления данными (MCP-сервером). Его основная задача — обрабатывать запросы пользователей, взаимодействуя с инструментами MCP для получения актуальной информации, а затем формировать точный ответ на основе этих данных. Вот как это происходит:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **MCPAgent передаёт сообщение в LLM** через OpenAI API, указывая доступные инструменты (MCP_TOOL_DEFINITIONS).  \n3. **LLM анализирует запрос** и возвращает `tool_calls` — список инструментов, которые нужно вызвать и их параметры. Например, для статистики будет использован `get_usage_stats`.  \n4. **MCPAgent вызывает инструменты** через MCPBridge, отправляя запросы на MCP-сервер (по протоколу JSON-RPC).  \n5. **MCP-сервер возвращает результаты** (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»), которые LLM получает как «role: tool» сообщения.  \n6. **LLM формирует финальный ответ** на основе данных из инструментов, передавая его пользователю.\n\n---\n\n**Инструменты, используемые MCP Agent:**\n\n1. **Управление логами**  \n   - `list_logs` — список всех разговоров.  \n   - `read_log` — детали конкретного разговора.  \n   - `search_logs` — поиск по логам (например, по дате или теме).  \n   - `get_conversation_summary` — краткое содержание разговора.  \n\n2. **Управление памятью агента**  \n   - `list_memory` — список сохранённых данных.  \n   - `read_memory` — чтение конкретного ключа памяти.  \n   - `save_memory` — сохранение новых данных (например, запоминание пользовательской информации).  \n   - `delete_memory_key` — удаление ключа памяти.  \n\n3. **Статистика использования**  \n   - `get_usage_stats` — данные о количестве разговоров, токенах и затратах.  \n\n---\n\n**Правила использования инструментов:**  \nMCP Agent строго следует правилам:  \n- **Не придумывает данные** — всегда использует реальные значения из инструментов.  \n- **Ищет информацию сначала в логах и памяти**, если пользователь спрашивает о истории.  \n- **Запоминает данные** через `save_memory`, если пользователь просит сохранить информацию.  \n\nПример:  \nЕсли пользователь спрашивает «Сколько разговоров было за месяц?», MCP Agent вызовет `get_usage_stats`, получит данные с сервера и вернёт ответ вроде:  \n> «По данным системы",
+          "total_time": 31.47,
+          "ttft": 14.244,
+          "completion_tokens_est": 781,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 24.82,
+          "response_length": 2343,
+          "word_count": 284,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 32.785,
+        "avg_ttft": 16.951,
+        "avg_tokens_per_sec": 21.05,
+        "avg_word_count": 247.5,
+        "avg_keyword_score": 0.6,
+        "citation_rate": 1.0,
+        "source_rate": 0.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "temp_0.1",
+        "label": "Temperature=0.1",
+        "model": "qwen3:8b",
+        "temperature": 0.1,
+        "max_tokens": 1200,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "TinyAI использует архитектуру RAG-систем (Retrieval-Augmented Generation), которая включает в себя несколько ключевых компонентов, разделённых на модули. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   - **Layered Memory**: Три уровня памяти:  \n     - `ShortTermMemory` (deque, N=20) — временные данные.  \n     - `WorkingMemory` (dict, in-RAM) — активная область для текущих задач.  \n     - `LongTermMemory` (JSON-файл) — долгосрочное хранение.  \n   - **MemoryManager**: Управляет маршрутизацией данных между слоями.  \n   - **PersonalizedAgent**: Интегрирует пользовательские профили в системный prompt через `ProfileManager`.  \n\n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 1_  \n   > «ProfileManager — пресеты + пользовательские профили» — _документ 1_\n\n2. **Модуль `news_agent`**  \n   - **Pipeline + ReAct + FSM + MCP**:  \n     - **NewsPipeline**: Пять этапов LLM-вызовов (Planner, Researcher, Writer, Editor, SEO).  \n     - **AgentLoop (ReAct)**: Цикл \"Думай → Действуй → Наблюдай\" с ограничениями на итерации и токены.  \n     - **FSMAgent**: Управляет состоянием (planning → execution).  \n   - **ConversationSession**: Менеджер контекста с стратегиями (SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy) и компрессией данных.  \n   - **PostStorage**: Форматирует вывод (md/html/tg/json/plain).  \n   - **MCP-бэкенд**: JSON-RPC 2.0 для логов, памяти и статистики.  \n\n   > «Несколько стратегий генерации и MCP-бэкенд для логов/памяти» — _документ 1_  \n   > «Стратегии: SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy» — _документ 3_\n\n3. **Модуль `journalist_agent`**  \n   - **Invariant Enforcement**: Двухуровневая защита от нарушения редакционных правил (например, проверка на соответствие нормам).  \n\n4. **Модуль `mcp_server`**  \n   - **MCP stdio**: JSON-RPC 2.0-сервер для управления логами, памятью и статистикой.  \n\n5. **Дополнительные компоненты**",
+          "total_time": 33.706,
+          "ttft": 18.078,
+          "completion_tokens_est": 638,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 18.93,
+          "response_length": 1914,
+          "word_count": 211,
+          "error": null,
+          "keyword_score": 0.2,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI — это связующее звено между LLM (большим языковым моделью) и системой управления данными (MCP-сервером). Его основная задача — обрабатывать запросы пользователей, взаимодействуя с инструментами MCP, чтобы получать актуальные данные, а не выдумывать информацию. Вот как это работает:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **MCPAgent передаёт сообщение в LLM** через OpenAI API, указывая доступные инструменты (MCP_TOOL_DEFINITIONS).  \n3. **LLM анализирует запрос** и возвращает `tool_calls` — список инструментов, которые нужно вызвать и их параметры. Например, для статистики это может быть `get_usage_stats`.  \n4. **MCPAgent вызывает инструменты** через MCPBridge, отправляя запросы на MCP-сервер (по протоколу JSON-RPC).  \n5. **MCP-сервер обрабатывает запрос**, возвращает данные (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»).  \n6. **Данные возвращаются LLM как «tool_response»**, после чего модель формирует окончательный ответ пользователю.  \n\n---\n\n**Инструменты, которые использует MCP Agent:**  \nОни разделены на три категории:  \n1. **Управление логами разговоров**  \n   - `list_logs` — список всех логов.  \n   - `read_log` — детали конкретного разговора.  \n   - `search_logs` — поиск по логам.  \n   - `get_conversation_summary` — краткое содержание разговора.  \n\n2. **Управление памятью агента**  \n   - `list_memory` — список сохранённых данных.  \n   - `read_memory` — чтение конкретного ключа.  \n   - `save_memory` — сохранение новых данных.  \n   - `delete_memory_key` — удаление ключа.  \n\n3. **Статистика использования**  \n   - `get_usage_stats` — общая статистика (разговоры, токены, стоимость и т.д.).  \n\n> «Ты — интеллектуальный ассистент с доступом к системе управления историей и памятью. У тебя есть MCP-инструменты для работы с: 1. ЛОГАМИ РАЗГОВОРОВ… 3. СТАТИСТИКОЙ — get_usage_stats» — _workflow/prompts_reference.md_\n\n---\n\n**Как это интегрируется с MCP-сервером?**  \nMCP-сервер выступает как JSON-RPC 2.0-бэкенд, обрабатывающий запросы от MCPAgent. Например, при вызове `list_logs` сервер возвращает список логов, а при `get_usage_stats` — числовые данные.  \n\n> «ДОСТУПНЫЕ ИНСТРУМЕН",
+          "total_time": 31.314,
+          "ttft": 14.19,
+          "completion_tokens_est": 730,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 23.31,
+          "response_length": 2190,
+          "word_count": 264,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 32.51,
+        "avg_ttft": 16.134,
+        "avg_tokens_per_sec": 21.04,
+        "avg_word_count": 237.5,
+        "avg_keyword_score": 0.6,
+        "citation_rate": 1.0,
+        "source_rate": 0.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "temp_0.3",
+        "label": "Temperature=0.3",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 1200,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает в себя несколько ключевых компонентов, которые работают вместе для управления контекстом, памятью и генерацией ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   - **Layered Memory**: Три уровня памяти:  \n     - `ShortTermMemory` (deque, N=20) — временные данные.  \n     - `WorkingMemory` (dict, in-RAM) — активная область для текущих задач.  \n     - `LongTermMemory` (JSON-файл) — долгосрочное хранение.  \n   - **MemoryManager** — управляет маршрутизацией данных между слоями.  \n   - **PersonalizedAgent** — интегрирует пользовательские профили в системный prompt для персонализации.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 1_.\n\n2. **Модуль `news_agent`**  \n   - **Pipeline + ReAct + FSM + MCP**:  \n     - **NewsPipeline** — последовательность 5 вызовов LLM для планирования, исследований, написания и редактирования.  \n     - **FSMAgent** — управляет состоянием процесса (planning → execution).  \n     - **ContextCompressor** — сокращает историю диалога для экономии токенов (стратегии: SlidingWindow, StickyFacts, Branching).  \n   - **PostStorage** и **OutputFormatter** — форматируют вывод (Markdown, HTML, JSON и т.д.).  \n   - **TokenCounter** и **UsageTracker** — отслеживают использование токенов и логируют статистику.  \n   > «Несколько стратегий генерации и MCP-бэкэнд для логов/памяти» — _документ 1_.\n\n3. **Модуль `journalist_agent`**  \n   - **Invariant Enforcement** — двухуровневая защита от нарушения редакционных правил (например, проверка на соответствие нормам).  \n\n4. **Модуль `mcp_server`**  \n   - **MCP stdio** — JSON-RPC 2.0-бэкенд для управления логами, памятью и статистикой.  \n   > «JSON-RPC 2.0 бэкенд для логов, памяти, статистики» — _документ 1_.\n\n5. **Общие компоненты**  \n   - **Cloud.ru Foundation Models** — используются как основа (модели `zai-org/GLM-4.7` и `zai-org/GLM-4.7-Flash`).  \n   - **StrategyLogger** — записывает стратегии обработки контекста в формате `.jsonl`.  \n\nЭти модули и инструменты позволяют RAG-",
+          "total_time": 33.552,
+          "ttft": 16.804,
+          "completion_tokens_est": 678,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 20.21,
+          "response_length": 2036,
+          "word_count": 239,
+          "error": null,
+          "keyword_score": 0.0,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как связующее звено между Large Language Model (LLM) и системой управления данными (MCP-сервер). Его основная задача — обрабатывать запросы пользователей, взаимодействуя с инструментами MCP, чтобы получать актуальные данные и формировать точные ответы. Вот как это происходит:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **MCPAgent передаёт сообщение в LLM** через OpenAI API, указывая доступные инструменты (MCP_TOOL_DEFINITIONS).  \n3. **LLM анализирует запрос** и возвращает `tool_calls` — список инструментов, которые нужно вызвать, и их параметры. Например, для статистики используется `get_usage_stats`.  \n4. **MCPAgent вызывает инструменты** через MCPBridge, отправляя запросы на MCP-сервер (по протоколу JSON-RPC).  \n5. **MCP-сервер обрабатывает запрос**, возвращает результат (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»).  \n6. **Результаты возвращаются LLM** как «role: tool»-сообщения, после чего LLM формирует окончательный ответ пользователю.\n\n---\n\n**Инструменты, используемые MCP Agent:**\n\n1. **Для работы с логами разговоров:**  \n   - `list_logs` — список всех логов.  \n   - `read_log` — детали конкретного разговора.  \n   - `search_logs` — поиск по логам (например, по дате или теме).  \n   - `get_conversation_summary` — краткое содержание разговора.  \n\n2. **Для управления памятью агента:**  \n   - `list_memory` — список сохранённых данных.  \n   - `read_memory` — чтение конкретного ключа памяти.  \n   - `save_memory` — сохранение новых данных (например, запоминание пользовательской информации).  \n   - `delete_memory_key` — удаление ключа памяти.  \n\n3. **Для получения статистики:**  \n   - `get_usage_stats` — общая статистика (разговоры, токены, стоимость).  \n\n> «Ты — интеллектуальный ассистент с доступом к системе управления историей и памятью. У тебя есть MCP-инструменты для работы с: 1. ЛОГАМИ РАЗГОВОРОВ… 3. СТАТИСТИКОЙ — get_usage_stats» — _документ 3_\n\n---\n\n**Пример работы:**  \nЕсли пользователь спрашивает: «Какие разговоры были вчера?», MCPAgent вызовет `search_logs` с параметром даты. Результаты вернутся как «role: tool», и LLM сформирует ответ, основываясь на реальных данных из логов.\n\n───  \n[N] Источники:  \n[1] docs/tasks/TASK17_README.md — Раздел: Как работает MCPAgent  \n[2] docs/ARCHITECTURE.md — Раздел: TinyAI — Архитектурная документация  \n[3] docs/workflow/prompts_reference.md — Раздел: MCP Agent — системный промпт  \n[4] docs/tasks/TASK16_README.md — Раздел: Запускается одной командой — клиент сам поднимает сервер",
+          "total_time": 29.436,
+          "ttft": 9.948,
+          "completion_tokens_est": 851,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 28.91,
+          "response_length": 2555,
+          "word_count": 309,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 31.494,
+        "avg_ttft": 13.376,
+        "avg_tokens_per_sec": 24.27,
+        "avg_word_count": 274.0,
+        "avg_keyword_score": 0.5,
+        "citation_rate": 1.0,
+        "source_rate": 0.5,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "temp_0.5",
+        "label": "Temperature=0.5",
+        "model": "qwen3:8b",
+        "temperature": 0.5,
+        "max_tokens": 1200,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает в себя следующие ключевые компоненты, которые работают вместе для обеспечения эффективного извлечения информации и генерации ответов:\n\n1. **NewsPipeline**  \n   Это основной модуль, отвечающий за последовательность шагов в RAG-процессе. Он включает в себя:\n   - **Planner** — планировщик задач, определяющий, какие данные нужно извлечь.\n   - **Researcher** — модуль, который использует LLM для поиска информации в внешних источниках.\n   - **Writer/Editor/SEO** — этапы форматирования и оптимизации ответа для пользователя.  \n   > «5 LLM-вызовов: Planner, Researcher, Writer, Editor, SEO» — _[3]_\n\n2. **ConversationSession**  \n   Управляет контекстом диалога, обеспечивая связность ответов. Использует стратегии для сокращения объема данных:\n   - **SlidingWindowStrategy** — фиксирует окно последних сообщений.\n   - **StickyFactsStrategy** — сохраняет ключевые факты из прошлых диалогов.\n   - **BranchingStrategy** — оптимизирует токены для сложных запросов.  \n   > «Стратегии: SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy» — _[3]_\n\n3. **LongTermMemory (из memory_agent)**  \n   Хранит информацию в формате JSON-файла, доступную для извлечения в процессе генерации ответов.  \n   > «LongTermMemory (JSON file)» — _[1]_\n\n4. **PostStorage и OutputFormatter**  \n   Ответы форматируются в нужный вид (Markdown, HTML, JSON и т.д.) и сохраняются в PostStorage для дальнейшего использования.  \n   > «PostStorage ── OutputFormatter (md/html/tg/json/plain)» — _[3]_\n\n5. **TokenCounter и UsageTracker**  \n   Отслеживают использование токенов и генерируют статистику для анализа эффективности RAG-процесса.  \n   > «TokenCounter (tiktoken + fallback chars÷4)» — _[3]_\n\n───  \n**Источники:**",
+          "total_time": 33.701,
+          "ttft": 20.233,
+          "completion_tokens_est": 576,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 17.09,
+          "response_length": 1730,
+          "word_count": 197,
+          "error": null,
+          "keyword_score": 0.2,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как бридж между пользователем и системой управления логами, памятью и статистикой. Его основная задача — обрабатывать запросы, используя MCP-инструменты, и возвращать точные данные, а не гипотезы. Вот как это происходит:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **LLM анализирует запрос** и определяет, какие MCP-инструменты нужно вызвать. Например, для статистики — `get_usage_stats`.  \n3. **MCPAgent отправляет вызовы** через MCPBridge на MCP-сервер (JSON-RPC), где они обрабатываются.  \n4. **Результаты возвращаются LLM** как «tool_response», которые затем используются для формирования окончательного ответа пользователю.  \n\n---\n\n**Инструменты, которые использует MCP Agent:**  \nОн работает с тремя основными категориями:  \n- **Логи разговоров**:  \n  - `list_logs` — список всех логов.  \n  - `read_log` — детали конкретного разговора.  \n  - `search_logs` — поиск по логам.  \n  - `get_conversation_summary` — краткий обзор диалога.  \n- **Память агента**:  \n  - `list_memory` — список сохранённых данных.  \n  - `read_memory` — чтение конкретного ключа.  \n  - `save_memory` — сохранение новых данных.  \n  - `delete_memory_key` — удаление ключа.  \n- **Статистика**:  \n  - `get_usage_stats` — данные о токенах, разговорах и затратах.  \n\n> «Правила: Используй инструменты для получения реальных данных, не придумывай» — _документ 3_  \n> «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15» — _документ 1_  \n\n---\n\n───  \n**Источники:**  \n[1] Источник: docs/tasks/TASK17_README.md — Раздел: Как работает MCPAgent  \n[2] Источник: docs/ARCHITECTURE.md — Раздел: TinyAI — Архитектурная документация  \n[3] Источник: docs/workflow/prompts_reference.md — Раздел: MCP Agent — системный промпт  \n[4] Источник: docs/ARCHITECTURE.md — Раздел: 1. Обзор проекта  \n[5] Источник: docs/tasks/TASK16_README.md — Раздел: Запускается одной командой — клиент сам поднимает сервер",
+          "total_time": 26.296,
+          "ttft": 11.043,
+          "completion_tokens_est": 644,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 24.49,
+          "response_length": 1932,
+          "word_count": 234,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 29.998,
+        "avg_ttft": 15.638,
+        "avg_tokens_per_sec": 20.33,
+        "avg_word_count": 215.5,
+        "avg_keyword_score": 0.6,
+        "citation_rate": 1.0,
+        "source_rate": 1.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "temp_0.7",
+        "label": "Temperature=0.7",
+        "model": "qwen3:8b",
+        "temperature": 0.7,
+        "max_tokens": 1200,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает в себя несколько ключевых компонентов, которые работают вместе для обеспечения эффективного управления информацией и генерации ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   Этот модуль реализует **многоуровневую систему памяти**, которая критически важна для RAG-систем. Он состоит из трёх слоёв:  \n   - **ShortTermMemory** (кэш на основе `deque`, хранит последнее из 20 сообщений) — используется для временного хранения информации, необходимой для текущего диалога.  \n   - **WorkingMemory** (словарь в памяти) — хранит активные данные, которые модель использует в процессе генерации.  \n   - **LongTermMemory** (JSON-файл) — долгосрочное хранение информации, доступное для перезагрузки.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 2_\n\n2. **Модуль `news_agent`**  \n   Реализует **pipeline с ReAct-паттерном** и FSM (Finite State Machine), что позволяет структурировать процесс поиска информации и генерации ответов. Основные элементы:  \n   - **Planner/Researcher/Writer/Editor** — этапы обработки запроса: планирование, поиск информации, генерация текста и редактирование.  \n   - **SEO-модуль** — оптимизация результатов под ключевые слова.  \n   - **FSMAgent** — управляет состояниями процесса (например, переход от планирования к выполнению).  \n   > «Несколько стратегий генерации и MCP-бэкэнд для логов/памяти» — _документ 2_\n\n3. **MCP-сервер (mcp_server)**  \n   Выступает в роли **JSON-RPC 2.0 бэкенда**, отвечающего за логирование, хранение данных и статистику. Он интегрируется с модулями `memory_agent` и `news_agent` для синхронизации данных и управления состоянием системы.  \n   > «JSON-RPC 2.0 бэкенд для логов, памяти, статистики» — _документ 2_\n\n4. **Контекстные стратегии и компрессия**  \n   Для оптимизации использования токенов применяются стратегии:  \n   - **SlidingWindowStrategy** — суммаризация старых сообщений.  \n   - **StickyFactsStrategy** — фокус на ключевых фактах.  \n   - **BranchingStrategy** — экономия токенов на 40–60%.  \n   > «Стратегии: SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy» — _документ 3_\n\n5. **Интеграция с моделями**  \n   Используются модели Cloud.ru (например, `zai-org/GLM-4.7`), которые обеспечивают генерацию текста и обработку контекста.  \n\n───  \n**Источники:**  \n[2] Tiny",
+          "total_time": 33.545,
+          "ttft": 15.034,
+          "completion_tokens_est": 774,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 23.07,
+          "response_length": 2324,
+          "word_count": 266,
+          "error": null,
+          "keyword_score": 0.2,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как бридж между пользователем и сервером MCP, обеспечивая взаимодействие с системными инструментами для управления логами, памятью и статистикой. Его workflow состоит из нескольких этапов:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **LLM (большой языковой модель) анализирует запрос** и определяет, какие MCP-инструменты нужно вызвать. Для этого он использует API OpenAI с указанием `tools=MCP_TOOL_DEFINITIONS`.  \n3. **MCPAgent выполняет вызовы инструментов** через MCPBridge, отправляя их на MCP-сервер (по протоколу JSON-RPC). Например, для запроса статистики вызывается `get_usage_stats`.  \n4. **MCP-сервер возвращает данные** (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»), которые LLM получает как «role: tool» сообщения.  \n5. **LLM формирует финальный ответ** на основе полученных данных, основываясь на системном промпте, который указывает использовать реальные данные из инструментов, а не придумывать их.\n\n### Инструменты, используемые MCP Agent:\nСписок доступных инструментов управляется MCP-сервером и включает:\n- **Логи разговоров**: `list_logs`, `read_log`, `search_logs`, `get_conversation_summary`  \n- **Память агента**: `list_memory`, `read_memory`, `save_memory`, `delete_memory_key`  \n- **Статистика**: `get_usage_stats`  \n\nПример использования:  \n> «Пользователь: \"Покажи статистику использования\"  \n→ LLM: `tool_call(get_usage_stats, {})`  \n→ MCP Server: возвращает данные  \n→ LLM: \"По данным системы, за все время было 12 разговоров...\"»  \n_документ_\n\n### Правила работы:\n- **Использование инструментов**: MCP Agent обязуется получать данные только через системные инструменты, не придумывая информацию.  \n- **Приоритет источников**: При вопросах об истории сначала ищутся данные в логах и памяти агента.  \n- **Запоминание**: Если пользователь просит сохранить информацию, используется `save_memory`.  \n\n───  \n**Источники**:  \n[1] Источник: docs/tasks/TASK17_README.md | Раздел: 2. Демо агента с MCP-инструментами  \n[2] Источник: docs/workflow/prompts_reference.md | Раздел: 4. MCP Agent — системный промпт  \n[3] Источник: docs/tasks/TASK16_README.md | Раздел: Запускается одной командой — клиент сам поднимает сервер",
+          "total_time": 29.071,
+          "ttft": 12.302,
+          "completion_tokens_est": 744,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 25.59,
+          "response_length": 2232,
+          "word_count": 256,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 31.308,
+        "avg_ttft": 13.668,
+        "avg_tokens_per_sec": 24.24,
+        "avg_word_count": 261.0,
+        "avg_keyword_score": 0.6,
+        "citation_rate": 1.0,
+        "source_rate": 1.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "max_tok_800",
+        "label": "Max tokens=800",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 800,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает в себя несколько ключевых компонентов, которые работают вместе для управления контекстом, памятью и генерацией ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   Реализует **Layered Memory** (слоистую память) с тремя уровнями:  \n   - **ShortTermMemory** (временная память, очередь из 20 элементов)  \n   - **WorkingMemory** (рабочая память, хранится в оперативке)  \n   - **LongTermMemory** (долгосрочная память, сохран",
+          "total_time": 23.876,
+          "ttft": 20.072,
+          "completion_tokens_est": 157,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 6.58,
+          "response_length": 473,
+          "word_count": 53,
+          "error": null,
+          "keyword_score": 0.0,
+          "has_citations": false,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI — это интеграция между LLM (большой языковой моделью) и системой управления данными через MCP (Management Control Plane). Его основная задача — обрабатывать запросы пользователей, используя реальные данные из логов, памяти агента и статистики, а не гадать. Вот как это работает:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **LLM получает сообщение** и, используя MCP-инструменты, формирует команду для получения данных. Например, вызывает `get_usage_stats` без аргументов.  \n3. **MCPAgent передаёт команду** в MCP-сервер через JSON-RPC-протокол. Сервер обрабатывает запрос и возвращает данные (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»).  \n4. **LLM получает результат** и формирует окончательный ответ для пользователя: «По данным системы, за все время было 12 разговоров...».\n\n---\n\n**Инструменты MCP Agent**  \nMCP Agent использует шесть ключевых инструментов, разделённых на три категории:  \n\n1. **Управление логами разговоров**  \n  ",
+          "total_time": 21.783,
+          "ttft": 14.139,
+          "completion_tokens_est": 340,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 15.61,
+          "response_length": 1020,
+          "word_count": 127,
+          "error": null,
+          "keyword_score": 0.75,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 22.83,
+        "avg_ttft": 17.105,
+        "avg_tokens_per_sec": 10.89,
+        "avg_word_count": 90.0,
+        "avg_keyword_score": 0.38,
+        "citation_rate": 0.5,
+        "source_rate": 0.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "max_tok_2000",
+        "label": "Max tokens=2000",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 2000,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "TinyAI использует архитектуру, сочетающую механизмы извлечения информации (retrieval) и генерации (generation), характерные для RAG-систем. Основные компоненты:\n\n1. **Модуль `memory_agent`**  \n   Реализует **слоистую память** с тремя уровнями:  \n   - **ShortTermMemory** (deque, N=20) — временные данные, быстро доступные.  \n   - **WorkingMemory** (dict, в памяти) — активные данные для текущего диалога.  \n   - **LongTermMemory** (JSON-файл) — долгосрочное хранение.  \n   Управление памятью через `MemoryManager`, а персонализация — через `PersonalizedAgent` с встроенными профилями пользователей.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _ARCHITECTURE.md_\n\n2. **Модуль `news_agent`**  \n   Сочетает **ReAct-паттерн** (Reason + Act) с FSM (Finite State Machine) и MCP-бэкендом:  \n   - **Pipeline** с 5 этапами LLM-вызовов (планирование, исследование, написание, редактирование, SEO).  \n   - **ContextCompressor** и стратегии сжатия контекста:  \n     - `SlidingWindowStrategy` (окно из последних сообщений).  \n     - `StickyFactsStrategy` (суммаризация старых данных).  \n     - `BranchingStrategy` (экономия токенов на 40-60%).  \n   - **PostStorage** и форматирование вывода (HTML, JSON, Markdown).  \n   > «Несколько стратегий генерации и MCP-бэкенд для логов/памяти» — _ARCHITECTURE.md_\n\n3. **Модуль `journalist_agent`**  \n   Обеспечивает **двууровневую защиту от нарушений правил** (например, редакционных ограничений), что важно для RAG-систем, где требуется точность и соответствие контексту.  \n\n4. **MCP-сервер**  \n   JSON-RPC 2.0-бэкенд для:  \n   - Логирования (логи в `logs/conversation_*.json`).  \n   - Управления памятью и статистикой.  \n   - Интеграции с Cloud.ru Foundation Models (OpenAI-совместимый API).  \n   > «JSON-RPC 2.0 бэкенд для логов, памяти, статистики» — _ARCHITECTURE.md_\n\n5. **Дополнительные инструменты**  \n   - **TokenCounter** (с поддержкой `tiktoken` и альтернативных методов).  \n   - **UsageTracker** для мониторинга использования токенов.  \n   - **StrategyLogger** для записи стратегий в формат `.jsonl`.  \n\n───  \n**Источники:**  \n[1] TinyAI — Архитектурная документация | Раздел: Обзор проекта  \n[2] TinyAI — Архитектурная документация | Раздел: Архитектурная схема проекта  \n[3] TinyAI — Архитектурная документация | Раздел: Структура проекта  \n[4] Logs | Раздел: Структура проекта  \n[5] С маркерами [Конец ответа] после каждого | Раздел: Структура проекта",
+          "total_time": 40.866,
+          "ttft": 20.196,
+          "completion_tokens_est": 803,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 19.65,
+          "response_length": 2410,
+          "word_count": 268,
+          "error": null,
+          "keyword_score": 0.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как бридж между LLM (большой языковой моделью) и MCP-сервером, который управляет логами, памятью и статистикой. Его основная задача — обрабатывать запросы пользователей, вызывая соответствующие инструменты и возвращая результаты в виде ответов. Вот как это происходит:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **LLM получает сообщение** и анализирует, какие инструменты из MCP-сервера нужно вызвать. Например, он может определить, что нужен инструмент `get_usage_stats`.  \n3. **MCPAgent выполняет вызов** через JSON-RPC-интерфейс MCP-сервера, получая данные (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»).  \n4. **LLM формирует финальный ответ** на основе полученных данных, добавляя их в результирующий текст.  \n\n### Инструменты, используемые MCP Agent\nMCP Agent имеет доступ к следующим инструментам, которые позволяют ему управлять данными и историей:\n\n- **Логи разговоров**:  \n  - `list_logs` — список всех логов.  \n  - `read_log` — детали конкретного разговора.  \n  - `search_logs` — поиск по логам.  \n  - `get_conversation_summary` — краткое содержание разговора.  \n\n- **Память агента**:  \n  - `list_memory` — список сохранённых данных.  \n  - `read_memory` — чтение конкретного ключа.  \n  - `save_memory` — сохранение новых данных.  \n  - `delete_memory_key` — удаление ключа.  \n\n- **Статистика**:  \n  - `get_usage_stats` — данные о токенах, разговорах и затратах.  \n\n> «Ты — интеллектуальный ассистент с доступом к системе управления историей и памятью. У тебя есть MCP-инструменты для работы с: 1. ЛОГАМИ РАЗГОВОРОВ… 3. СТАТИСТИКОЙ — get_usage_stats» — _документ 3_\n\n### Как это работает на практике\nЕсли пользователь спрашивает: «Какие разговоры были сегодня?», MCPAgent вызовет `search_logs` с фильтром по дате. Результаты вернутся как «role: tool», а LLM сформирует ответ, например: «Сегодня были разговоры с 14:00 и 16:30…».\n\n───  \n**Источники**:  \n[1] Источник: docs/tasks/TASK17_README.md — Раздел: Как работает MCPAgent  \n[2] Источник: docs/ARCHITECTURE.md — Раздел: TinyAI — Архитектурная документация  \n[3] Источник: docs/workflow/prompts_reference.md — Раздел: MCP Agent — системный промпт  \n[4] Источник: docs/ARCHITECTURE.md — Раздел: TinyAI — Архитектурная документация  \n[5] Источник: docs/tasks/TASK16_README.md — Раздел: Запускается одной командой — клиент сам поднимает сервер",
+          "total_time": 31.135,
+          "ttft": 11.616,
+          "completion_tokens_est": 798,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 25.63,
+          "response_length": 2394,
+          "word_count": 299,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 36.001,
+        "avg_ttft": 15.906,
+        "avg_tokens_per_sec": 22.24,
+        "avg_word_count": 283.5,
+        "avg_keyword_score": 0.5,
+        "citation_rate": 1.0,
+        "source_rate": 1.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "max_tok_3000",
+        "label": "Max tokens=3000",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 3000,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает несколько ключевых компонентов, которые работают вместе для управления контекстом, памятью и генерацией ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   - **Layered Memory** (Три слоя памяти):  \n     - `ShortTermMemory` (deque, N=20) — временные данные, удаляемые после использования.  \n     - `WorkingMemory` (dict, in-RAM) — активная область для текущих задач.  \n     - `LongTermMemory` (JSON-файл) — долгосрочное хранение информации.  \n   - **MemoryManager** — управляет маршрутизацией данных между слоями.  \n   - **PersonalizedAgent** — интегрирует пользовательские профили в системный prompt для персонализации.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 2_.\n\n2. **Модуль `news_agent`**  \n   - **Pipeline + ReAct + FSM + MCP** — комбинированный подход к генерации ответов:  \n     - **NewsPipeline** — последовательность 5 вызовов LLM для планирования, исследований, написания и редактирования.  \n     - **FSMAgent** (Finite State Machine) — управляет состоянием процесса (планирование → выполнение).  \n     - **ContextCompressor** — сжимает историю диалога для экономии токенов (стратегии: SlidingWindowStrategy, StickyFactsStrategy).  \n   - **PostStorage** — хранит и форматирует вывод (md/html/tg/json/plain).  \n   - **TokenCounter** и **UsageTracker** — отслеживают использование токенов и логируют статистику.  \n   > «Несколько стратегий генерации и MCP-бэкенд для логов/памяти» — _документ 2_.\n\n3. **MCP-сервер**  \n   - **JSON-RPC 2.0 бэкенд** — обрабатывает запросы к логам, памяти и статистике.  \n   - **StrategyLogger** — сохраняет логи в формате `.jsonl` для анализа.  \n   > «MCP stdio — JSON-RPC 2.0 бэкенд для логов, памяти, статистики» — _документ 2_.\n\n4. **Интеграция с моделями**  \n   - Использует **Cloud.ru Foundation Models** (OpenAI-совместимый API).  \n   - По умолчанию: `zai-org/GLM-4.7` и `zai-org/GLM-4.7-Flash`.  \n   > «Используемый API: Cloud.ru Foundation Models (OpenAI-совместимый)» — _документ 2_.\n\n5. **Контекстная стратегия**  \n   - **ConversationSession** — управляет историей диалога и выбором стратегии (например, `SlidingWindowStrategy` для сокращения токенов).  \n   - **ContextCompressor** — сжимает данные для экономии ресурсов.  \n   > «Стратегии: SlidingWindowStrategy, StickyFactsStrategy» — _документ 3_.\n\n───  \n**Источники:**  \n[2] TinyAI — Архитектурная документация | Раздел: 1. Обзор проекта  \n[3] TinyAI — Архитектурная документация | Раздел: 1. Архитектурная схема проекта  \n[4] Logs | Структура проекта  \n[5] С маркерами [Конец ответа] после каждого | Структура проекта",
+          "total_time": 39.207,
+          "ttft": 17.164,
+          "completion_tokens_est": 869,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 22.16,
+          "response_length": 2607,
+          "word_count": 305,
+          "error": null,
+          "keyword_score": 0.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как бридж между LLM (большой языковой моделью) и MCP-сервером, обеспечивая взаимодействие с системными инструментами. Его основная задача — обрабатывать запросы пользователей, вызывать нужные инструменты и возвращать результаты в виде ответа. Вот как это происходит:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **MCPAgent передаёт сообщение в LLM** через OpenAI API, указывая доступные инструменты (`tools=MCP_TOOL_DEFINITIONS`).  \n3. **LLM анализирует запрос** и возвращает `tool_calls` — список инструментов, которые нужно вызвать, и их параметры. Например, для статистики LLM может выбрать `get_usage_stats`.  \n4. **MCPAgent выполняет вызовы** через MCPBridge, отправляя запросы на MCP-сервер (по протоколу JSON-RPC).  \n5. **MCP-сервер обрабатывает запрос**, возвращает данные (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»).  \n6. **Результаты возвращаются LLM**, которое формирует окончательный ответ пользователю, основываясь на данных из инструментов.\n\n---\n\n**Инструменты, используемые MCP Agent:**\n\n1. **ЛОГИ РАЗГОВОРОВ**  \n   - `list_logs` — список всех логов.  \n   - `read_log` — детали конкретного разговора.  \n   - `search_logs` — поиск по логам.  \n   - `get_conversation_summary` — краткое содержание разговора.  \n   *Пример:* Если пользователь спрашивает о предыдущих диалогах, MCP Agent ищет информацию в логах.  \n\n2. **ПАМЯТЬ АГЕНТА**  \n   - `list_memory` — список сохранённых данных.  \n   - `read_memory` — чтение конкретного ключа.  \n   - `save_memory` — сохранение новых данных.  \n   - `delete_memory_key` — удаление ключа.  \n   *Пример:* Если пользователь просит запомнить информацию, Agent использует `save_memory`.  \n\n3. **СТАТИСТИКА**  \n   - `get_usage_stats` — общая статистика (разговоры, токены, стоимость).  \n   *Пример:* При запросе «Покажи статистику» Agent вызывает этот инструмент и возвращает данные.  \n\n---\n\n**Ключевые особенности:**  \n- MCP Agent **не придумывает данные** — он использует реальные результаты из инструментов.  \n- При вопросах об истории сначала ищет в **логах и памяти**, а затем только возвращается к LLM.  \n\n---\n\n**Пример работы:**  \nПользователь: «Покажи статистику использования»  \n→ LLM: вызывает `get_usage_stats`  \n→ MCP Server: возвращает «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»  \n→ LLM: формирует ответ «По данным системы...»  \n\n───  \n**Источники:**  \n[1] Источник: docs/tasks/TASK17_README.md — Раздел: Как работает MCPAgent  \n[2] Источник: docs/workflow/prompts_reference.md — Раздел: MCP Agent — системный промпт  \n[3] Источник: docs/tasks/TASK16_README.md — Раздел: Доступные инструменты MCP  \n[4] Источник: docs/ARCHITECTURE.md — Раздел: MCP server (JSON-RPC для логов/памяти)",
+          "total_time": 33.99,
+          "ttft": 11.432,
+          "completion_tokens_est": 914,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 26.89,
+          "response_length": 2743,
+          "word_count": 324,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 36.599,
+        "avg_ttft": 14.298,
+        "avg_tokens_per_sec": 24.36,
+        "avg_word_count": 314.5,
+        "avg_keyword_score": 0.5,
+        "citation_rate": 1.0,
+        "source_rate": 1.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "top_p_0.7",
+        "label": "Top-p=0.7",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 1200,
+        "top_p": 0.7,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает несколько ключевых компонентов, которые работают вместе для управления контекстом, памятью и генерацией ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   - **Layered Memory**: Три уровня памяти:  \n     - `ShortTermMemory` (deque, хранит последнее из 20 сообщений),  \n     - `WorkingMemory` (dict, в памяти компьютера),  \n     - `LongTermMemory` (JSON-файл, для долгосрочного хранения).  \n   - **MemoryManager**: Управляет маршрутизацией данных между слоями памяти.  \n   - **PersonalizedAgent**: Интегрирует профиль пользователя в системный prompt, используя `ProfileManager` для управления пресетами и настраиваемыми параметрами.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 2_\n\n2. **Модуль `news_agent`**  \n   - **Pipeline + ReAct + FSM**: Стратегии генерации (планирование, исследование, написание, редактирование, SEO-оптимизация).  \n   - **FSMAgent**: Управляет состоянием процесса (planning → execution).  \n   - **ConversationSession**: Обрабатывает контекст с помощью стратегий (SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy) и компрессоров для экономии токенов.  \n   - **PostStorage**: Форматирует вывод (Markdown, HTML, JSON и т.д.).  \n   - **TokenCounter и UsageTracker**: Отслеживают использование токенов и логируют статистику.  \n   > «Несколько стратегий генерации и MCP-бэкэнд для логов/памяти» — _документ 2_\n\n3. **MCP-сервер**  \n   - JSON-RPC 2.0-бэкенд для управления логами, памятью и статистикой.  \n   - Интегрируется с модулями через MCP-интерфейс для синхронизации данных.  \n   > «MCP stdio» — _документ 2_\n\n4. **Поддержка LLM и API**  \n   - Использует Cloud.ru Foundation Models (OpenAI-совместимый API).  \n   - По умолчанию применяются модели `zai-org/GLM-4.7` и `zai-org/GLM-4.7-Flash`.  \n   - Логи хранятся в папке `logs/` в формате JSON с расширенной статистикой.  \n   > «Models: zai-org/GLM-4.7 · zai-org/GLM-4.7-Flash» — _документ 2_\n\n───  \n**Источники**:  \n[2] Источ",
+          "total_time": 34.204,
+          "ttft": 17.069,
+          "completion_tokens_est": 664,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 19.41,
+          "response_length": 1994,
+          "word_count": 223,
+          "error": null,
+          "keyword_score": 0.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как бридж между LLM (большой языковой моделью) и MCP-сервером, обеспечивая доступ к системным данным и функциям. Его основная задача — передавать запросы пользователя в LLM, а затем использовать MCP-инструменты для получения актуальной информации из системы, чтобы сформировать точный ответ. Вот как это происходит:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **MCPAgent передаёт сообщение в LLM** через OpenAI API, указывая доступные MCP-инструменты (`tools=MCP_TOOL_DEFINITIONS`).  \n3. **LLM анализирует запрос** и возвращает `tool_calls` — список инструментов, которые нужно вызвать и их параметры. Например, для статистики будет использован `get_usage_stats`.  \n4. **MCPAgent вызывает инструменты** через MCPBridge, отправляя запросы на MCP-сервер (по протоколу JSON-RPC).  \n5. **Результаты возвращаются LLM** как «tool_response», где система предоставляет реальные данные (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»).  \n6. **LLM формирует окончательный ответ** на основе этих данных, который отправляется пользователю.\n\n---\n\n**Инструменты, используемые MCP Agent:**\n\n1. **ЛОГИ РАЗГОВОРОВ**  \n   - `list_logs` — список всех логов.  \n   - `read_log` — детали конкретного разговора.  \n   - `search_logs` — поиск по логам (например, по дате или теме).  \n   - `get_conversation_summary` — краткое содержание разговора.  \n   *Пример:* Если пользователь спрашивает о предыдущем диалоге, агент ищет информацию в логах, а не придумывает её.  \n\n2. **ПАМЯТЬ АГЕНТА**  \n   - `list_memory` — список сохранённых данных.  \n   - `read_memory` — чтение конкретного ключа памяти.  \n   - `save_memory` — сохранение новых данных (например, запоминание пользовательской информации).  \n   - `delete_memory_key` — удаление ключа.  \n   *Пример:* Если пользователь просит запомнить детали, агент использует `save_memory` для хранения информации.  \n\n3. **СТАТИСТИКА**  \n   - `get_usage_stats` — данные о токенах, разговорах и затратах.  \n   *Пример:* При запросе «Покажи статистику» агент вызывает этот инструмент, чтобы получить актуальные цифры.  \n\n---\n\n**Ключевые правила для MCP Agent:**  \n- **Не придумывать данные** — всегда использовать реальные значения из инструментов.  \n- **Исследовать логи и память** при вопросах об истории.  \n- **Сохранять информацию** через `",
+          "total_time": 31.98,
+          "ttft": 14.227,
+          "completion_tokens_est": 782,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 24.45,
+          "response_length": 2347,
+          "word_count": 285,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 33.092,
+        "avg_ttft": 15.648,
+        "avg_tokens_per_sec": 21.85,
+        "avg_word_count": 254.0,
+        "avg_keyword_score": 0.5,
+        "citation_rate": 1.0,
+        "source_rate": 0.5,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "top_p_0.8",
+        "label": "Top-p=0.8",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 1200,
+        "top_p": 0.8,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает несколько ключевых компонентов, которые работают вместе для обеспечения эффективного управления контекстом, памятью и генерацией ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   - **Layered Memory**: Три уровня памяти:  \n     - `ShortTermMemory` (deque, N=20) — временные данные.  \n     - `WorkingMemory` (dict, in-RAM) — активная область для текущих задач.  \n     - `LongTermMemory` (JSON-файл) — долгосрочное хранение.  \n   - **MemoryManager**: Управляет маршрутизацией данных между слоями.  \n   - **PersonalizedAgent**: Интегрирует профили пользователей в системный prompt для персонализации.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 1_.\n\n2. **Модуль `news_agent`**  \n   - **Pipeline + ReAct + FSM**:  \n     - **Planner/Researcher/Writer**: Структурированный процесс генерации (думать → действовать → наблюдать).  \n     - **ToolDispatcher**: Выполняет вызовы внешних функций (например, для поиска информации).  \n   - **FSMAgent**: Управляет состояниями выполнения задач (planning → execution).  \n   - **ConversationSession**:  \n     - **Стратегии контекста**:  \n       - `SlidingWindowStrategy` (окно скольжения),  \n       - `StickyFactsStrategy` (факты остаются в памяти),  \n       - `BranchingStrategy` (экономит токены на ~40-60%).  \n     - **ContextCompressor**: Сжимает историю для оптимизации токенов.  \n   > «Несколько стратегий генерации и MCP-бэкэнд для логов/памяти» — _документ 1_.\n\n3. **MCP-сервер (Memory & Context Provider)**  \n   - JSON-RPC 2.0-бэкенд для:  \n     - Хранения логов, памяти и статистики.  \n     - Интеграции с другими модулями (например, `news_agent`).  \n   > «JSON-RPC 2.0 бэкенд для логов, памяти, статистики» — _документ 1_.\n\n4. **Поддерживающие компоненты**  \n   - **TokenCounter**: Учет токенов (использует `tiktoken` и альтернативные методы).  \n   - **UsageTracker**: Отслеживает использование моделей и сохраняет статистику в `logs/usage_stats.json`.  \n   - **OutputFormatter**: Форматирует вывод (Markdown, HTML, JSON и т.д.).  \n   - **StrategyLogger**: Логирует стратегии работы с контекстом в",
+          "total_time": 34.3,
+          "ttft": 16.779,
+          "completion_tokens_est": 708,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 20.64,
+          "response_length": 2124,
+          "word_count": 232,
+          "error": null,
+          "keyword_score": 0.2,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "",
+          "total_time": 31.975,
+          "ttft": 31.975,
+          "completion_tokens_est": 1,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 0.03,
+          "response_length": 0,
+          "word_count": 0,
+          "error": null,
+          "keyword_score": 0.0,
+          "has_citations": false,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 33.138,
+        "avg_ttft": 24.377,
+        "avg_tokens_per_sec": 10.7,
+        "avg_word_count": 116.0,
+        "avg_keyword_score": 0.1,
+        "citation_rate": 0.5,
+        "source_rate": 0.0,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "top_p_1.0",
+        "label": "Top-p=1.0",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 1200,
+        "top_p": 1.0,
+        "prompt": "original",
+        "nothink": true
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает несколько ключевых компонентов, которые работают вместе для управления контекстом, памятью и генерацией ответов. Вот основные элементы:\n\n1. **Модуль `memory_agent`**  \n   Реализует **Layered Memory** (слоистую память) с тремя уровнями:  \n   - **ShortTermMemory** (временная память, очередь из 20 элементов)  \n   - **WorkingMemory** (рабочая память, хранится в оперативке)  \n   - **LongTermMemory** (долгосрочная память, сохраняется в JSON-файле)  \n   Управление памятью происходит через `MemoryManager`, который маршрутизирует данные между слоями.  \n   > «Три слоя памяти с явным управлением маршрутизацией» — _документ 1_\n\n2. **Модуль `news_agent`**  \n   Использует **Pipeline + ReAct + FSM + MCP** для генерации ответов:  \n   - **ReAct** (план → действие → наблюдение) — структура для поиска информации и генерации.  \n   - **FSM (Finite State Machine)** — управляет состояниями процесса.  \n   - **MCP-бэкенд** (Memory Control Protocol) — хранит логи, память и статистику.  \n   Также включает **стратегии контекста** (SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy) для оптимизации токенов.  \n   > «Несколько стратегий генерации и MCP-бэкэнд для логов/памяти» — _документ 1_\n\n3. **Модуль `journalist_agent`**  \n   Реализует **Invariant Enforcement** (защита от нарушений правил), включая:  \n   - **Двухуровневую проверку** редакционных ограничений",
+          "total_time": 34.179,
+          "ttft": 22.384,
+          "completion_tokens_est": 467,
+          "prompt_tokens_est": 2362,
+          "tokens_per_sec": 13.66,
+          "response_length": 1403,
+          "word_count": 159,
+          "error": null,
+          "keyword_score": 0.0,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI работает как связующее звено между Large Language Model (LLM) и системой управления данными (MCP-сервер). Его основная задача — обрабатывать запросы пользователей, взаимодействуя с инструментами MCP для получения актуальной информации и формируя окончательный ответ. Вот как это происходит:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **MCPAgent передаёт сообщение в LLM** через OpenAI API, указывая доступные инструменты (MCP_TOOL_DEFINITIONS).  \n3. **LLM анализирует запрос** и возвращает `tool_calls` — список инструментов, которые нужно вызвать, и их параметры. Например, для статистики будет использован `get_usage_stats`.  \n4. **MCPAgent вызывает инструменты** через MCPBridge, отправляя запросы на MCP-сервер (по протоколу JSON-RPC).  \n5. **MCP-сервер обрабатывает запрос**, возвращает данные (например, «Разговоров: 12, Токенов: 50,000, Стоимость: $0.15»).  \n6. **LLM получает результаты** в формате `role: tool` и использует их для генерации окончательного ответа пользователю.\n\n---\n\n**Инструменты, используемые MCP Agent:**\n\n1. **Для работы с логами разговоров:**  \n   - `list_logs` — список всех логов.  \n   - `read_log` — детали конкретного разговора.  \n   - `search_logs` — поиск по логам.  \n   - `get_conversation_summary` — краткое содержание разговора.  \n\n2. **Для управления памятью агента:**  \n   - `list_memory` — список ключей памяти.  \n   - `read_memory` — чтение значения ключа.  \n   - `save_memory` — сохранение данных в память.  \n   - `delete_memory_key` — удаление ключа.  \n\n3. **Для получения статистики:**  \n   - `get_usage_stats` — общая статистика использования (разговоры, токены, стоимость и т.д.).  \n\n---\n\n**Пример работы:**  \nКогда пользователь спрашивает «Покажи статистику использования», MCPAgent вызывает `get_usage_stats`, а MCP-сервер возвращает данные. LLM формирует ответ:  \n> «По данным системы, за все время было 12 разговоров...»  \n\n---\n\n**Ключевые цитаты из документов:**  \n> «Ты — интеллектуальный ассистент с доступом к системе управления историей и памятью. У тебя есть MCP-инструменты для работы с: 1. ЛОГАМИ РАЗГОВОРОВ... 3. СТАТИСТИКОЙ — get_usage_stats» — _документ 3_.  \n\n> «MCPAgent передаёт его в LLM через OpenAI API с `tools=MCP_TOOL_DEFINITIONS`» — _документ 1_.  \n\n> «ДОСТУПНЫЕ ИНСТРУМЕНТЫ MCP (6 шт.): 1. list_logs... 6. get_usage_stats» — _документ 5_.  \n\n───  \n**Источники:**  \n[1] Источник: docs/tasks/TASK17_README.md — Раздел: 2. Демо агента с MCP-инструментами  \n[2] Источник: docs/ARCHITECTURE.md — Раздел: TinyAI — Архитектурная документация  \n[3] Источник: docs/workflow/prompts_reference.md — Раздел: 4. MCP Agent —",
+          "total_time": 31.825,
+          "ttft": 10.412,
+          "completion_tokens_est": 883,
+          "prompt_tokens_est": 1529,
+          "tokens_per_sec": 27.75,
+          "response_length": 2651,
+          "word_count": 326,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 33.002,
+        "avg_ttft": 16.398,
+        "avg_tokens_per_sec": 20.45,
+        "avg_word_count": 242.5,
+        "avg_keyword_score": 0.5,
+        "citation_rate": 1.0,
+        "source_rate": 0.5,
+        "errors": 0,
+        "total_questions": 2
+      }
+    },
+    {
+      "config": {
+        "name": "no_nothink",
+        "label": "Без /nothink (thinking mode ON)",
+        "model": "qwen3:8b",
+        "temperature": 0.3,
+        "max_tokens": 1200,
+        "top_p": 0.9,
+        "prompt": "original",
+        "nothink": false
+      },
+      "questions": [
+        {
+          "question_id": "factual_1",
+          "question_type": "factual",
+          "response": "Архитектура RAG-системы TinyAI включает в себя несколько ключевых компонентов, которые работают вместе для обеспечения эффективного управления контекстом, памятью и генерацией ответов. Основные элементы:\n\n1. **Модуль `news_agent`**  \n   Этот модуль реализует паттерн **Pipeline + ReAct + FSM + MCP**, где:\n   - **Pipeline** — последовательность этапов обработки запроса (планирование, исследование, написание, редактирование).  \n   - **ReAct** (Reason + Act) — стратегия, сочетающая логическое мышление с выполнением действий (например, вызов внешних инструментов).  \n   - **FSM (Finite State Machine)** — управление состояниями процесса генерации (например, переход от планирования к выполнению).  \n   - **MCP (Memory, Context, Persistence)** — интеграция с системой хранения контекста и логов.  \n   > «5 LLM-вызовов: Planner, Researcher, Writer, Editor, SEO» — _[3]_  \n   > «FSMAgent: planning → execution» — _[3]_\n\n2. **Управление контекстом и памятью**  \n   - **ConversationSession** — управляет историей диалога и стратегиями компрессии контекста (например, `SlidingWindowStrategy`, `StickyFactsStrategy`).  \n   - **SessionStorage** — хранит данные сессии для последующего использования.  \n   - **PostStorage** — форматирует вывод (HTML, JSON, Markdown и т.д.).  \n   > «Стратегии: SlidingWindowStrategy, StickyFactsStrategy, BranchingStrategy» — _[3]_\n\n3. **Система логирования и аналитики**  \n   - **MCP-бэкенд** (через `mcp_server`) — обрабатывает логи, статистику и сохраняет данные в JSON-файлах.  \n   - **UsageTracker** — отслеживает использование токенов и сохраняет метрики в `usage_stats.json`.  \n   > «JSON-RPC 2.0 бэкенд для логов, памяти, статистики» — _[1]_\n\n4. **Интеграция с внешними моделями**  \n   - Использует **Cloud.ru Foundation Models** (OpenAI-совместимый API), такие как `zai-org/GLM-4.7` и `zai-org/GLM-4.7-Flash`.  \n   - Поддерживает **персонализацию** через `PersonalizedAgent` с инъекцией профиля пользователя в системный prompt.  \n\n5. **Контроль ресурсов**  \n   - **TokenCounter** — подсчет токенов с использованием `tiktoken` и альтернативных методов.  \n   - **StrategyLogger** — запись стратегий в формате `.jsonl` для анализа.  \n\n───",
+          "total_time": 33.569,
+          "ttft": 16.221,
+          "completion_tokens_est": 723,
+          "prompt_tokens_est": 2359,
+          "tokens_per_sec": 21.54,
+          "response_length": 2169,
+          "word_count": 249,
+          "error": null,
+          "keyword_score": 0.2,
+          "has_citations": true,
+          "has_sources": true,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        },
+        {
+          "question_id": "factual_2",
+          "question_type": "factual",
+          "response": "MCP Agent в TinyAI — это связующее звено между LLM (большой языковой моделью) и системой управления данными (MCP-сервером). Его основная задача — обрабатывать запросы пользователей, взаимодействуя с инструментами MCP, чтобы получать актуальные данные и формировать точные ответы. Вот как это работает:\n\n1. **Пользователь отправляет запрос** (например, «Покажи статистику использования»).  \n2. **MCPAgent передаёт запрос в LLM** через OpenAI API, указывая доступные инструменты (MCP_TOOL_DEFINITIONS).  \n3. **LLM анализирует запрос** и возвращает `tool_calls` — список инструментов, которые нужно вызвать и их параметры. Например, для статистики используется `get_usage_stats`.  \n4. **MCPAgent вызывает инструменты** через MCPBridge, отправляя запросы на MCP-сервер (по протоколу JSON-RPC).  \n5. **MCP-сервер возвращает результаты**, которые LLM получает как «сообщения с ролью tool».  \n6. **LLM формирует окончательный ответ**, используя данные из инструментов, и отправляет его пользователю.  \n\nПример:  \nКогда пользователь спрашивает о статистике, LLM вызывает `get_usage_stats`, MCP-сервер возвращает данные («Разговоров: 12, Токенов: 50,000...»), и LLM отвечает, интегрируя эти числа в текст.  \n\n---\n\n**Инструменты, используемые MCP Agent:**  \nMCP Agent имеет доступ к трём категориям инструментов, описанных в системном промпте:  \n\n1. **Управление логами разговоров**  \n   - `list_logs` — список всех логов  \n   - `read_log` — детали конкретного лога  \n   - `search_logs` — поиск по логам  \n   - `get_conversation_summary` — краткое содержание разговора  \n\n2. **Управление памятью агента**  \n   - `list_memory` — список ключей памяти  \n   - `read_memory` — чтение значения ключа  \n   - `save_memory` — сохранение данных в память  \n   - `delete_memory_key` — удаление ключа  \n\n3. **Статистика использования**  \n   - `get_usage_stats` — общая статистика (разговоры, токены, стоимость и т.д.)  \n\nЭти инструменты позволяют агенту получать данные напрямую из системы, а не гадать или фантазировать. Например, если пользователь спрашивает о «памяти агента», MCP Agent сначала ищет информацию в логах и памяти, а затем сохраняет новые данные с помощью `save_memory`.  \n\n---\n\n**Ключевые цитаты из документов:**  \n> «Ты — интеллектуальный ассистент с доступом к системе управления историей и памятью.» — _workflow/prompts_reference.md_  \n> «Используй инструменты для получения реальных данных, не придумывай",
+          "total_time": 31.306,
+          "ttft": 13.169,
+          "completion_tokens_est": 801,
+          "prompt_tokens_est": 1526,
+          "tokens_per_sec": 25.59,
+          "response_length": 2403,
+          "word_count": 298,
+          "error": null,
+          "keyword_score": 1.0,
+          "has_citations": true,
+          "has_sources": false,
+          "ram_before_mb": 0.0,
+          "ram_after_mb": 0.0
+        }
+      ],
+      "aggregated": {
+        "avg_time": 32.438,
+        "avg_ttft": 14.695,
+        "avg_tokens_per_sec": 23.49,
+        "avg_word_count": 273.5,
+        "avg_keyword_score": 0.6,
+        "citation_rate": 1.0,
+        "source_rate": 0.5,
+        "errors": 0,
+        "total_questions": 2
+      }
+    }
+  ]
+}
