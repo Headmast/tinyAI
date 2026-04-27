@@ -25,6 +25,18 @@ python3 demos/run_3topics.py --model zai-org/GLM-4.7 --max-tokens 4000
 
 # 5. Запуск MCP-агента (День 17)
 python3 demos/demo_mcp_agent.py
+
+# 6. Локальный приватный LLM-сервис
+python3 local_llm_service.py --host 0.0.0.0 --port 8000 --model qwen3:8b
+
+# 7. HTTP-клиент к локальному сервису
+python3 local_llm_client.py --base-url http://127.0.0.1:8000 chat "Привет, локальная LLM"
+
+# 8. Dashboard
+open http://127.0.0.1:8000/dashboard
+
+# 9. Журналист-агент через локальный сервис
+python3 demos/run_local_journalist_agent.py --base-url http://127.0.0.1:8000 --model qwen3:8b
 ```
 
 ---
@@ -147,6 +159,28 @@ tinyAI/
 ---
 
 ## Task 17 — MCPAgent с function calling
+
+## Локальный приватный LLM-сервис
+
+В проект добавлен thin HTTP-сервис для локальной модели с OpenAI-compatible endpoint:
+
+```bash
+# upstream: локальная Ollama на сервере/VPS
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 \
+python3 local_llm_service.py --host 0.0.0.0 --port 8000 --model qwen3:8b
+
+# health-check и простой чат
+python3 local_llm_client.py --base-url http://server-ip:8000 health
+python3 local_llm_client.py --base-url http://server-ip:8000 chat "Сделай краткое резюме новости"
+
+# smoke-check доступа, параллельных запросов и лимитов
+python3 demos/check_local_llm_service.py --base-url http://server-ip:8000 --parallel 4
+
+# dashboard
+open http://server-ip:8000/dashboard
+```
+
+Подробности: `docs/LOCAL_LLM_SERVICE.md`.
 
 День 17: агент автоматически вызывает MCP-инструменты через function calling для работы с историей и памятью.
 

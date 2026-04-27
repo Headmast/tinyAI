@@ -31,6 +31,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 CLOUD_BASE_URL = "https://foundation-models.api.cloud.ru/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
+LOCAL_LLM_BASE_URL = "http://localhost:8000"
 
 DEFAULT_MODEL = "zai-org/GLM-4.7"
 DEFAULT_FAST_MODEL = "zai-org/GLM-4.7-Flash"
@@ -45,6 +46,7 @@ class AppConfig:
     cloud_api_key: str = ""
     openai_api_key: str = ""
     base_url: str = CLOUD_BASE_URL
+    local_llm_base_url: str = LOCAL_LLM_BASE_URL
     default_model: str = DEFAULT_MODEL
     default_fast_model: str = DEFAULT_FAST_MODEL
     default_temperature: float = DEFAULT_TEMPERATURE
@@ -89,10 +91,18 @@ def get_config() -> AppConfig:
             cloud_api_key=os.getenv("CLOUD_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             base_url=os.getenv("BASE_URL", CLOUD_BASE_URL),
+            local_llm_base_url=os.getenv("LOCAL_LLM_BASE_URL", LOCAL_LLM_BASE_URL),
             default_model=os.getenv("DEFAULT_MODEL", DEFAULT_MODEL),
             default_fast_model=os.getenv("DEFAULT_FAST_MODEL", DEFAULT_FAST_MODEL),
         )
     return _config
+
+
+def _normalize_openai_base_url(base_url: str) -> str:
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        return base_url
+    return base_url + "/v1"
 
 
 def get_llm_client(provider: str = "cloud") -> "OpenAI":
@@ -116,6 +126,13 @@ def get_llm_client(provider: str = "cloud") -> "OpenAI":
         return OpenAI(
             api_key="ollama",
             base_url=ollama_url,
+        )
+
+    if provider in {"local", "local_service"}:
+        local_url = os.getenv("LOCAL_LLM_BASE_URL", config.local_llm_base_url)
+        return OpenAI(
+            api_key="local-service",
+            base_url=_normalize_openai_base_url(local_url),
         )
 
     if provider == "openai":

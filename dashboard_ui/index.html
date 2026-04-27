@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TinyAI Local Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/static/dashboard.css" />
+</head>
+<body>
+  <div class="bg-shape bg-shape-a"></div>
+  <div class="bg-shape bg-shape-b"></div>
+
+  <main class="container">
+    <header class="header">
+      <h1>TinyAI Local LLM Dashboard</h1>
+      <p>Статус сервиса, токены и история запросов/ответов</p>
+      <div id="last-updated" class="muted">Обновление...</div>
+    </header>
+
+    <section class="grid cards-4">
+      <article class="card">
+        <h2>Статус</h2>
+        <div id="service-status" class="value">-</div>
+        <div id="service-model" class="muted">model: -</div>
+      </article>
+      <article class="card">
+        <h2>Запросы</h2>
+        <div id="total-requests" class="value">0</div>
+        <div id="request-breakdown" class="muted">ok: 0 / fail: 0</div>
+      </article>
+      <article class="card">
+        <h2>Токены</h2>
+        <div id="total-tokens" class="value">0</div>
+        <div id="token-breakdown" class="muted">prompt: 0 / completion: 0</div>
+      </article>
+      <article class="card">
+        <h2>Нагрузка</h2>
+        <div id="active-requests" class="value">0</div>
+        <div id="limits" class="muted">limits: -</div>
+      </article>
+    </section>
+
+    <section class="grid cards-3">
+      <article class="card slim">
+        <h2>Rate limit hits</h2>
+        <div id="rate-limit-hits" class="value">0</div>
+      </article>
+      <article class="card slim">
+        <h2>Ошибки 4xx</h2>
+        <div id="bad-request-errors" class="value">0</div>
+      </article>
+      <article class="card slim">
+        <h2>Ошибки upstream</h2>
+        <div id="upstream-errors" class="value">0</div>
+      </article>
+    </section>
+
+    <section class="card history-card">
+      <div class="history-head">
+        <h2>История запросов</h2>
+        <label class="muted">limit
+          <select id="history-limit">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+      </div>
+      <div id="history-list" class="history-list"></div>
+    </section>
+  </main>
+
+  <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>
