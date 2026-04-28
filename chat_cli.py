@@ -3,6 +3,7 @@
 RAG Chat CLI — мини-чат с RAG-поиском, источниками и памятью задачи.
 
 Команды:
+  /help <вопрос>   — спросить ассистента о проекте (RAG + Git)
   /goal <текст>    — явно задать цель диалога
   /memory          — показать состояние рабочей памяти
   /history         — показать последние сообщения диалога
@@ -25,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from dotenv import load_dotenv
 from rag.rag_chat_agent import RagChatAgent
+from dev_assistant import DevAssistant
 
 load_dotenv()
 
@@ -52,6 +54,7 @@ class RagChatCLI:
         self.verbose = verbose
         self._last_result: Optional[Dict] = None
         self._running = True
+        self._dev_assistant: Optional[DevAssistant] = None
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -90,6 +93,7 @@ class RagChatCLI:
         arg = parts[1] if len(parts) > 1 else ""
 
         HANDLERS = {
+            "/help": self._cmd_help,
             "/goal": self._cmd_goal,
             "/memory": self._cmd_memory,
             "/history": self._cmd_history,
@@ -107,6 +111,7 @@ class RagChatCLI:
         else:
             print(f"\n  ❌ Неизвестная команда: {command}")
             print(f"  Доступные команды:")
+            print(f"    /help <вопрос> — спросить ассистента о проекте")
             print(f"    /goal <текст>  — задать цель диалога")
             print(f"    /memory        — показать память задачи")
             print(f"    /history       — последние сообщения")
@@ -114,6 +119,34 @@ class RagChatCLI:
             print(f"    /stats         — статистика")
             print(f"    /sources       — источники последнего ответа")
             print(f"    /quit          — выйти")
+
+    def _cmd_help(self, arg: str) -> None:
+        """Ассистент разработчика: отвечает на вопросы о проекте."""
+        if not arg:
+            print(f"\n  ℹ️  Использование: /help <ваш вопрос о проекте>")
+            print(f"  Примеры:")
+            print(f"    /help Как устроена архитектура проекта?")
+            print(f"    /help Какие MCP-серверы есть в проекте?")
+            print(f"    /help На какой я ветке?")
+            return
+
+        # Lazy init
+        if self._dev_assistant is None:
+            print(f"\n  ⏳ Инициализация ассистента...")
+            self._dev_assistant = DevAssistant(verbose=self.verbose)
+
+        print(f"\n  ⏳ Ищу ответ в документации проекта...")
+        try:
+            answer = self._dev_assistant.answer_help(arg)
+        except Exception as e:
+            print(f"\n  ❌ Ошибка: {e}")
+            return
+
+        print(f"\n{SEP}")
+        print(f"  🛠️  Developer Assistant")
+        print(f"{SUB}")
+        print(f"\n{answer}")
+        print(f"\n{SEP}")
 
     def _cmd_goal(self, arg: str) -> None:
         if not arg:
