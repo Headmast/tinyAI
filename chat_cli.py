@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from dotenv import load_dotenv
 from rag.rag_chat_agent import RagChatAgent
+from code_reviewer import CodeReviewer
 from dev_assistant import DevAssistant
 
 load_dotenv()
@@ -55,6 +56,7 @@ class RagChatCLI:
         self._last_result: Optional[Dict] = None
         self._running = True
         self._dev_assistant: Optional[DevAssistant] = None
+        self._code_reviewer: Optional[CodeReviewer] = None
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -94,6 +96,11 @@ class RagChatCLI:
 
         HANDLERS = {
             "/help": self._cmd_help,
+            "/review": self._cmd_review,
+            "/search": self._cmd_search,
+            "/analyze": self._cmd_analyze,
+            "/fix": self._cmd_fix,
+            "/refactor": self._cmd_refactor,
             "/goal": self._cmd_goal,
             "/memory": self._cmd_memory,
             "/history": self._cmd_history,
@@ -109,9 +116,14 @@ class RagChatCLI:
         if handler:
             handler(arg)
         else:
-            print(f"\n  ❌ Неизвестная команда: {command}")
+            print(f"  ❌ Неизвестная команда: {command}")
             print(f"  Доступные команды:")
             print(f"    /help <вопрос> — спросить ассистента о проекте")
+            print(f"    /review [base] — AI-ревью кода (по умолчанию working dir)")
+            print(f"    /search <паттерн> — поиск по коду + AI-анализ")
+            print(f"    /analyze <файл> — анализ файла на проблемы")
+            print(f"    /fix <файл> [описание] — найти и исправить проблемы")
+            print(f"    /refactor <файл> [цель] — предложить рефакторинг")
             print(f"    /goal <текст>  — задать цель диалога")
             print(f"    /memory        — показать память задачи")
             print(f"    /history       — последние сообщения")
@@ -146,6 +158,157 @@ class RagChatCLI:
         print(f"  🛠️  Developer Assistant")
         print(f"{SUB}")
         print(f"\n{answer}")
+        print(f"\n{SEP}")
+
+    def _cmd_review(self, arg: str) -> None:
+        """AI-ревью кода: анализ diff с GPT-5-nano."""
+        # Lazy init
+        if self._code_reviewer is None:
+            print(f"\n  ⏳ Инициализация code reviewer...")
+            self._code_reviewer = CodeReviewer(verbose=self.verbose)
+
+        if arg.strip() == "staged":
+            print(f"\n  ⏳ Анализирую staged изменения...")
+            try:
+                report = self._code_reviewer.review_staged()
+            except Exception as e:
+                print(f"\n  ❌ Ошибка: {e}")
+                return
+        elif arg.strip():
+            print(f"\n  ⏳ Анализирую PR: текущая ветка vs {arg.strip()}...")
+            try:
+                report = self._code_reviewer.review_pr(base_branch=arg.strip())
+            except Exception as e:
+                print(f"\n  ❌ Ошибка: {e}")
+                return
+        else:
+            print(f"\n  ⏳ Анализирую незакоммиченные изменения...")
+            try:
+                report = self._code_reviewer.review_working()
+            except Exception as e:
+                print(f"\n  ❌ Ошибка: {e}")
+                return
+
+        print(f"\n{SEP}")
+        print(f"  🔍 AI Code Review")
+        print(f"{SUB}")
+        print(f"\n{report}")
+        print(f"\n{SEP}")
+
+    def _cmd_search(self, arg: str) -> None:
+        """AI-поиск по коду: находит паттерн и анализирует."""
+        if not arg:
+            print(f"\n  ℹ️  Использование: /search <паттерн>")
+            print(f"  Примеры:")
+            print(f"    /search eval(")
+            print(f"    /search TODO")
+            print(f"    /search subprocess.run")
+            return
+
+        if self._code_reviewer is None:
+            print(f"\n  ⏳ Инициализация code reviewer...")
+            self._code_reviewer = CodeReviewer(verbose=self.verbose)
+
+        print(f"\n  ⏳ Ищу '{arg}' в коде...")
+        try:
+            report = self._code_reviewer.search_code(arg)
+        except Exception as e:
+            print(f"\n  ❌ Ошибка: {e}")
+            return
+
+        print(f"\n{SEP}")
+        print(f"  🔎 AI Code Search")
+        print(f"{SUB}")
+        print(f"\n{report}")
+        print(f"\n{SEP}")
+
+    def _cmd_analyze(self, arg: str) -> None:
+        """Анализ файла: баги, безопасность, качество."""
+        if not arg:
+            print(f"\n  ℹ️  Использование: /analyze <файл>")
+            print(f"  Примеры:")
+            print(f"    /analyze core/config.py")
+            print(f"    /analyze mcp_server.py")
+            return
+
+        if self._code_reviewer is None:
+            print(f"\n  ⏳ Инициализация code reviewer...")
+            self._code_reviewer = CodeReviewer(verbose=self.verbose)
+
+        print(f"\n  ⏳ Анализирую {arg.strip()}...")
+        try:
+            report = self._code_reviewer.analyze_file(arg.strip())
+        except Exception as e:
+            print(f"\n  ❌ Ошибка: {e}")
+            return
+
+        print(f"\n{SEP}")
+        print(f"  📊 AI Code Analysis")
+        print(f"{SUB}")
+        print(f"\n{report}")
+        print(f"\n{SEP}")
+
+    def _cmd_fix(self, arg: str) -> None:
+        """Найти и исправить проблемы в файле."""
+        if not arg:
+            print(f"\n  ℹ️  Использование: /fix <файл> [описание проблемы]")
+            print(f"  Примеры:")
+            print(f"    /fix mcp_server.py")
+            print(f"    /fix core/config.py ошибка при отсутствии API-ключа")
+            return
+
+        if self._code_reviewer is None:
+            print(f"\n  ⏳ Инициализация code reviewer...")
+            self._code_reviewer = CodeReviewer(verbose=self.verbose)
+
+        parts = arg.strip().split(maxsplit=1)
+        file_path = parts[0]
+        issue = parts[1] if len(parts) > 1 else ""
+
+        desc = f" ({issue})" if issue else ""
+        print(f"\n  ⏳ Ищу исправления для {file_path}{desc}...")
+        try:
+            report = self._code_reviewer.fix_code(file_path, issue)
+        except Exception as e:
+            print(f"\n  ❌ Ошибка: {e}")
+            return
+
+        print(f"\n{SEP}")
+        print(f"  🔧 AI Code Fix")
+        print(f"{SUB}")
+        print(f"\n{report}")
+        print(f"\n{SEP}")
+
+    def _cmd_refactor(self, arg: str) -> None:
+        """Предложить рефакторинг файла."""
+        if not arg:
+            print(f"\n  ℹ️  Использование: /refactor <файл> [цель]")
+            print(f"  Примеры:")
+            print(f"    /refactor mcp_server.py")
+            print(f"    /refactor mcp_server.py разделить на модули")
+            print(f"    /refactor core/config.py улучшить читаемость")
+            return
+
+        if self._code_reviewer is None:
+            print(f"\n  ⏳ Инициализация code reviewer...")
+            self._code_reviewer = CodeReviewer(verbose=self.verbose)
+
+        parts = arg.strip().split(maxsplit=1)
+        file_path = parts[0]
+        goal = parts[1] if len(parts) > 1 else ""
+
+        desc = f" ({goal})" if goal else ""
+        print(f"\n  ⏳ Готовлю рефакторинг {file_path}{desc}...")
+        try:
+            report = self._code_reviewer.refactor(file_path, goal)
+        except Exception as e:
+            print(f"\n  ❌ Ошибка: {e}")
+            return
+
+        print(f"\n{SEP}")
+        print(f"  ♻️ AI Refactoring")
+        print(f"{SUB}")
+        print(f"\n{report}")
         print(f"\n{SEP}")
 
     def _cmd_goal(self, arg: str) -> None:

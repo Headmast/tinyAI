@@ -89,6 +89,60 @@ TOOLS = [
             "required": []
         }
     },
+    {
+        "name": "git_diff",
+        "description": "Возвращает полный diff изменений (содержимое патча). Можно указать base_branch для сравнения веток (git diff base..HEAD).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "base_branch": {
+                    "type": "string",
+                    "description": "Базовая ветка для сравнения (например 'main'). Если не указана — diff рабочей директории."
+                },
+                "staged": {
+                    "type": "boolean",
+                    "description": "Если true — показывает diff staged изменений"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "git_show_file",
+        "description": "Возвращает содержимое файла из текущего HEAD.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Путь к файлу относительно корня проекта"
+                }
+            },
+            "required": ["path"]
+        }
+    },
+    {
+        "name": "git_grep",
+        "description": "Поиск текста/паттерна по закоммиченному коду (git grep). Ищет в отслеживаемых файлах.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Строка или регулярное выражение для поиска"
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": "Фильтр по файлам (например '*.py')"
+                },
+                "ignore_case": {
+                    "type": "boolean",
+                    "description": "Игнорировать регистр при поиске"
+                }
+            },
+            "required": ["pattern"]
+        }
+    },
 ]
 
 
@@ -165,6 +219,56 @@ def tool_git_list_files(args: dict) -> str:
     return f"Отслеживаемые файлы ({count}):\n{output}"
 
 
+def tool_git_diff(args: dict) -> str:
+    """Полный diff (содержимое патча)."""
+    base_branch = args.get("base_branch", "")
+    if base_branch:
+        output = _run_git("diff", f"{base_branch}...HEAD")
+    elif args.get("staged"):
+        output = _run_git("diff", "--staged")
+    else:
+        output = _run_git("diff")
+    if not output:
+        return "Нет изменений."
+    return output
+
+
+def tool_git_show_file(args: dict) -> str:
+    """Содержимое файла из HEAD."""
+    path = args.get("path", "")
+    if not path:
+        return "Ошибка: не указан путь к файлу."
+    # Защита от path traversal
+    if ".." in path or path.startswith("/"):
+        return "Ошибка: недопустимый путь."
+    output = _run_git("show", f"HEAD:{path}")
+    return output
+
+
+def tool_git_grep(args: dict) -> str:
+    """Поиск текста по закоммиченному коду."""
+    pattern = args.get("pattern", "")
+    if not pattern:
+        return "Ошибка: не указан паттерн для поиска."
+    cmd_args = ["grep", "-n"]  # -n для номеров строк
+    if args.get("ignore_case"):
+        cmd_args.append("-i")
+    cmd_args.append("--")
+    cmd_args.append(pattern)
+    file_pattern = args.get("file_pattern", "")
+    if file_pattern:
+        cmd_args.append(file_pattern)
+    output = _run_git(*cmd_args, timeout=15)
+    if not output or output.startswith("Ошибка git"):
+        return f"Ничего не найдено по запросу: {pattern}"
+    lines = output.strip().splitlines()
+    count = len(lines)
+    if count > 100:
+        output = "\n".join(lines[:100])
+        return f"Найдено совпадений: {count} (показано первые 100):\n{output}"
+    return f"Найдено совпадений: {count}:\n{output}"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # JSON-RPC / MCP dispatch
 # ══════════════════════════════════════════════════════════════════════════════
@@ -175,6 +279,9 @@ TOOL_HANDLERS = {
     "git_diff_summary": tool_git_diff_summary,
     "git_log_short": tool_git_log_short,
     "git_list_files": tool_git_list_files,
+    "git_diff": tool_git_diff,
+    "git_show_file": tool_git_show_file,
+    "git_grep": tool_git_grep,
 }
 
 
