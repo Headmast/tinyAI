@@ -158,6 +158,33 @@ tinyAI/
 
 ---
 
+## Task 33 — Ассистент поддержки пользователей
+
+AI-ассистент для поддержки пользователей: RAG-поиск по FAQ + MCP-сервер с данными пользователей/тикетов + LLM.
+
+```bash
+# Проиндексировать FAQ
+python3 support_index.py
+
+# Использовать в чате
+python3 chat_cli.py
+# /support Почему не работает авторизация?
+# /support --user user_1 Почему не работает авторизация?
+# /support --ticket ticket_1 Помогите с моей проблемой
+```
+
+**Компоненты:**
+- `support_data/faq.md` — FAQ (7 разделов: авторизация, оплата, API, интеграции, данные, уведомления, команда)
+- `support_data/users.json`, `tickets.json` — данные пользователей и тикетов
+- `mcp_support_server.py` — MCP-сервер (5 инструментов: get_user, get_ticket, search_tickets и др.)
+- `support_index.py` — индексация FAQ в RAG (StructureChunker → FAISS)
+- `support_assistant.py` — SupportAssistant (RAG + MCP + LLM)
+- `mcp_stdio_client.py` — универсальный MCP-клиент (рефакторинг из DevAssistant)
+
+Подробности: `docs/SUPPORT_ASSISTANT.md`.
+
+---
+
 ## Task 17 — MCPAgent с function calling
 
 ## Локальный приватный LLM-сервис

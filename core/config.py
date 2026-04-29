@@ -34,7 +34,7 @@ OLLAMA_BASE_URL = "http://localhost:11434/v1"
 LOCAL_LLM_BASE_URL = "http://localhost:8000"
 
 DEFAULT_MODEL = "zai-org/GLM-4.7"
-DEFAULT_FAST_MODEL = "zai-org/GLM-4.7-Flash"
+DEFAULT_FAST_MODEL = "gpt-5-nano"
 DEFAULT_TEMPERATURE = 0.3
 DEFAULT_MAX_RETRIES = 3
 

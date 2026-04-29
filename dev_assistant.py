@@ -16,8 +16,6 @@ Developer Assistant — отвечает на вопросы о проекте �
 
 from __future__ import annotations
 
-import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -25,73 +23,13 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.config import get_config, get_llm_client
+from mcp_stdio_client import MCPStdioClient
 from rag import SearchResult
 from rag.search import search as rag_search
 
 PROJECT_ROOT = Path(__file__).parent
 DEFAULT_DEV_INDEX = PROJECT_ROOT / "rag_data_dev"
 MCP_GIT_SERVER = PROJECT_ROOT / "mcp_git_server.py"
-
-
-class _GitMCPClient:
-    """Минимальный MCP-клиент для git-сервера (одноразовый вызов)."""
-
-    def __init__(self, server_path: Path = MCP_GIT_SERVER):
-        self._server_path = server_path
-        self._proc: Optional[subprocess.Popen] = None
-        self._msg_id = 0
-
-    def _ensure_started(self):
-        if self._proc is not None:
-            return
-        self._proc = subprocess.Popen(
-            [sys.executable, str(self._server_path)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        # Handshake
-        self._send_recv("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "dev-assistant", "version": "1.0"},
-        })
-        # Notification
-        self._proc.stdin.write(
-            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"
-        )
-        self._proc.stdin.flush()
-
-    def call_tool(self, name: str, arguments: dict | None = None) -> str:
-        """Вызывает MCP-инструмент и возвращает текстовый результат."""
-        self._ensure_started()
-        resp = self._send_recv("tools/call", {"name": name, "arguments": arguments or {}})
-        result = resp.get("result", {})
-        content = result.get("content", [{}])
-        return content[0].get("text", "") if content else ""
-
-    def close(self):
-        if self._proc and self._proc.poll() is None:
-            try:
-                self._proc.stdin.close()
-                self._proc.wait(timeout=3)
-            except Exception:
-                self._proc.kill()
-        self._proc = None
-
-    def _send_recv(self, method: str, params: dict | None = None) -> dict:
-        self._msg_id += 1
-        msg = {"jsonrpc": "2.0", "id": self._msg_id, "method": method}
-        if params is not None:
-            msg["params"] = params
-        self._proc.stdin.write(json.dumps(msg, ensure_ascii=False) + "\n")
-        self._proc.stdin.flush()
-        raw = self._proc.stdout.readline()
-        if not raw:
-            raise RuntimeError("Git MCP server closed unexpectedly")
-        return json.loads(raw)
 
 
 class DevAssistant:
@@ -111,11 +49,14 @@ class DevAssistant:
         config = get_config()
         self.model = model or config.default_model
         self.verbose = verbose
-        self._git_client: Optional[_GitMCPClient] = None
+        self._git_client: Optional[MCPStdioClient] = None
 
-    def _get_git_client(self) -> _GitMCPClient:
+    def _get_git_client(self) -> MCPStdioClient:
         if self._git_client is None:
-            self._git_client = _GitMCPClient()
+            self._git_client = MCPStdioClient(
+                server_path=MCP_GIT_SERVER,
+                client_name="dev-assistant",
+            )
         return self._git_client
 
     def _get_git_context(self) -> str:

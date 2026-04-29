@@ -1229,3 +1229,55 @@ from mcp_package.scheduler import MCPSchedulerAgent
 
 Корневые модули (`mcp_agent.py`, `mcp_registry.py` и т.д.) сохранены
 для обратной совместимости.
+
+---
+
+## 18. Support Assistant (Task 33)
+
+AI-ассистент поддержки пользователей: RAG по FAQ + MCP-сервер пользователей/тикетов + LLM.
+
+### 18.1 Компоненты
+
+```
+support_data/
+  faq.md               — FAQ: 7 разделов (авторизация, оплата, API, интеграции...)
+  users.json           — Профили пользователей (5 записей)
+  tickets.json         — Тикеты поддержки (7 записей)
+
+mcp_support_server.py  — MCP-сервер (5 инструментов: get_user, get_ticket, ...)
+support_index.py       — Индексация FAQ → rag_data_support/ (FAISS)
+support_assistant.py   — SupportAssistant: RAG + MCP + LLM
+mcp_stdio_client.py    — Универсальный MCP stdio клиент (рефакторинг)
+```
+
+### 18.2 Архитектурная схема
+
+```
+/support --user user_1 Вопрос?
+         │
+         ▼
+┌──────────────────┐
+│ SupportAssistant │
+├──────┬───────────┤
+│ RAG  │    MCP    │
+│search│  Support  │
+│(FAQ) │  Server   │
+└──┬───┴─────┬─────┘
+   │         │
+   ▼         ▼
+┌─────────────────┐
+│      LLM        │
+│ FAQ + user ctx  │
+│ + question      │
+└────────┬────────┘
+         │
+         ▼
+  Персонализированный ответ
+```
+
+### 18.3 Рефакторинг: MCPStdioClient
+
+Извлечён общий `MCPStdioClient` из внутреннего `_GitMCPClient` в `dev_assistant.py`.
+Теперь и DevAssistant, и SupportAssistant используют единый клиент из `mcp_stdio_client.py`.
+
+Подробности: `docs/SUPPORT_ASSISTANT.md`.

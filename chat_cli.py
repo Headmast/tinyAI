@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from rag.rag_chat_agent import RagChatAgent
 from code_reviewer import CodeReviewer
 from dev_assistant import DevAssistant
+from support_assistant import SupportAssistant
 
 load_dotenv()
 
@@ -57,6 +58,7 @@ class RagChatCLI:
         self._running = True
         self._dev_assistant: Optional[DevAssistant] = None
         self._code_reviewer: Optional[CodeReviewer] = None
+        self._support_assistant: Optional[SupportAssistant] = None
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -96,6 +98,7 @@ class RagChatCLI:
 
         HANDLERS = {
             "/help": self._cmd_help,
+            "/support": self._cmd_support,
             "/review": self._cmd_review,
             "/search": self._cmd_search,
             "/analyze": self._cmd_analyze,
@@ -119,6 +122,7 @@ class RagChatCLI:
             print(f"  ❌ Неизвестная команда: {command}")
             print(f"  Доступные команды:")
             print(f"    /help <вопрос> — спросить ассистента о проекте")
+            print(f"    /support <вопрос> — спросить службу поддержки")
             print(f"    /review [base] — AI-ревью кода (по умолчанию working dir)")
             print(f"    /search <паттерн> — поиск по коду + AI-анализ")
             print(f"    /analyze <файл> — анализ файла на проблемы")
@@ -156,6 +160,62 @@ class RagChatCLI:
 
         print(f"\n{SEP}")
         print(f"  🛠️  Developer Assistant")
+        print(f"{SUB}")
+        print(f"\n{answer}")
+        print(f"\n{SEP}")
+
+    def _cmd_support(self, arg: str) -> None:
+        """Ассистент поддержки: отвечает на вопросы пользователей о продукте."""
+        if not arg:
+            print(f"\n  ℹ️  Использование: /support <вопрос>")
+            print(f"  Опции:")
+            print(f"    /support <вопрос>                — ответ из FAQ")
+            print(f"    /support --user USER_ID <вопрос> — с контекстом пользователя")
+            print(f"    /support --ticket TICKET_ID <вопрос> — с контекстом тикета")
+            print(f"  Примеры:")
+            print(f"    /support Почему не работает авторизация?")
+            print(f"    /support --user user_1 Почему не работает авторизация?")
+            print(f"    /support --ticket ticket_1 Помогите с моей проблемой")
+            return
+
+        # Parse --user and --ticket flags
+        user_id = None
+        ticket_id = None
+        parts = arg.split()
+        question_parts = []
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--user" and i + 1 < len(parts):
+                user_id = parts[i + 1]
+                i += 2
+            elif parts[i] == "--ticket" and i + 1 < len(parts):
+                ticket_id = parts[i + 1]
+                i += 2
+            else:
+                question_parts.append(parts[i])
+                i += 1
+        question = " ".join(question_parts)
+
+        if not question:
+            print(f"\n  ❌ Укажите вопрос после флагов.")
+            return
+
+        # Lazy init
+        if self._support_assistant is None:
+            print(f"\n  ⏳ Инициализация ассистента поддержки...")
+            self._support_assistant = SupportAssistant(verbose=self.verbose)
+
+        print(f"\n  ⏳ Ищу ответ в FAQ...")
+        try:
+            answer = self._support_assistant.answer(
+                question, user_id=user_id, ticket_id=ticket_id
+            )
+        except Exception as e:
+            print(f"\n  ❌ Ошибка: {e}")
+            return
+
+        print(f"\n{SEP}")
+        print(f"  🎧  Support Assistant")
         print(f"{SUB}")
         print(f"\n{answer}")
         print(f"\n{SEP}")

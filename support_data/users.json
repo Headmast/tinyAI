@@ -1,0 +1,57 @@
+[
+  {
+    "user_id": "user_1",
+    "name": "Алексей Петров",
+    "email": "a.petrov@example.com",
+    "plan": "pro",
+    "registered_at": "2025-11-15",
+    "last_login": "2026-04-28T14:30:00",
+    "features_enabled": ["api_access", "webhooks", "advanced_rag"],
+    "projects_count": 3,
+    "status": "active"
+  },
+  {
+    "user_id": "user_2",
+    "name": "Мария Иванова",
+    "email": "m.ivanova@example.com",
+    "plan": "free",
+    "registered_at": "2026-03-01",
+    "last_login": "2026-04-27T09:15:00",
+    "features_enabled": ["basic_rag"],
+    "projects_count": 1,
+    "status": "active"
+  },
+  {
+    "user_id": "user_3",
+    "name": "Дмитрий Сидоров",
+    "email": "d.sidorov@company.com",
+    "plan": "enterprise",
+    "registered_at": "2025-06-20",
+    "last_login": "2026-04-29T11:00:00",
+    "features_enabled": ["api_access", "webhooks", "advanced_rag", "sso", "sla"],
+    "projects_count": 8,
+    "status": "active"
+  },
+  {
+    "user_id": "user_4",
+    "name": "Елена Козлова",
+    "email": "e.kozlova@example.com",
+    "plan": "pro",
+    "registered_at": "2026-01-10",
+    "last_login": "2026-04-20T16:45:00",
+    "features_enabled": ["api_access", "webhooks", "advanced_rag"],
+    "projects_count": 2,
+    "status": "blocked"
+  },
+  {
+    "user_id": "user_5",
+    "name": "Иван Новиков",
+    "email": "i.novikov@example.com",
+    "plan": "free",
+    "registered_at": "2026-04-25",
+    "last_login": "2026-04-29T08:00:00",
+    "features_enabled": ["basic_rag"],
+    "projects_count": 1,
+    "status": "active"
+  }
+]
