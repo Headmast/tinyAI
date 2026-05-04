@@ -1,0 +1,25 @@
+# Session files — contain your auth token, NEVER commit these
+*.session
+*.session-journal
+*.session.bak*
+
+# Environment file with real credentials — NEVER commit
+.env
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# QR code images (temporary)
+telegram_qr_code.*
+
+# Analysis/debug files
+*.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/

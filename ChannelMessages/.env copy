@@ -1,0 +1,12 @@
+# Telegram API credentials (get at https://my.telegram.org)
+API_ID=20285585
+API_HASH=9b174b40060cdec735eaf30d6066a698
+
+# Your phone number (with country code, e.g. +79001234567)
+PHONE_NUMBER=+79950379400
+
+# Session file name (will be created automatically on first run)
+SESSION_NAME=channel_stats
+
+# Database URL (SQLite by default; for Postgres use postgresql+psycopg://user:pass@host/db)
+DB_URL=sqlite+aiosqlite:///channel_stats.db
